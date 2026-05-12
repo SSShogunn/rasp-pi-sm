@@ -4,7 +4,10 @@
       "Bash(find /home/aman/display_stuff/1.44inch-LCD-HAT-Code/RaspberryPi/c -type f | head -50)",
       "Read(//home/aman/display_stuff/1.44inch-LCD-HAT-Code/RaspberryPi/**)",
       "PowerShell(cmd /c \"dir /s /b d:\\\\VSCode-V2\\\\rasp-pi\\\\lib\")",
-      "Bash(cmd /c \"if not exist \\\\\"d:\\\\VSCode-V2\\\\rasp-pi\\\\.vscode\\\\\" mkdir \\\\\"d:\\\\VSCode-V2\\\\rasp-pi\\\\.vscode\\\\\"\")"
+      "Bash(cmd /c \"if not exist \\\\\"d:\\\\VSCode-V2\\\\rasp-pi\\\\.vscode\\\\\" mkdir \\\\\"d:\\\\VSCode-V2\\\\rasp-pi\\\\.vscode\\\\\"\")",
+      "PowerShell(cmd /c \"dir /s /b d:\\\\VSCode-V2\\\\rasp-pi\")",
+      "WebFetch(domain:www.waveshare.com)",
+      "PowerShell(cmd /c \"dir /s /b d:\\\\VSCode-V2\\\\rasp-pi\\\\1.44inch-LCD-HAT-Code\")"
     ]
   }
 }

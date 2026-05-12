@@ -1,10 +1,23 @@
 /*
  * system_monitor.c  –  Interactive 5-page dashboard for Pi Zero 2W
  * Display : Waveshare 1.44" LCD HAT  128×128  ST7735S (SPI)
- * Controls: 5-way joystick (Up/Down navigate pages) + 3 buttons
- *             KEY1 = toggle Pi-hole  |  KEY2 = force refresh  |  KEY3 = brightness
- * Build   : make clean && make
- * Run     : sudo ./system_monitor
+ *
+ * IMPORTANT – before running, add pull-ups to /boot/config.txt:
+ *   echo "gpio=6,19,5,26,13,21,20,16=pu" | sudo tee -a /boot/config.txt
+ *   sudo reboot
+ *
+ * Controls : Up/Down joystick  → navigate pages
+ *            KEY1 (GPIO 21)    → toggle Pi-hole blocking
+ *            KEY2 (GPIO 20)    → force refresh
+ *            KEY3 (GPIO 16)    → cycle brightness
+ *
+ * NOTE – Paint_DrawString_EN colour convention (Waveshare library quirk):
+ *   arg5 = background / non-text colour
+ *   arg6 = foreground / text colour
+ *   e.g. WHITE text on BLACK bg → Paint_DrawString_EN(x,y,s,font, BLACK, WHITE)
+ *
+ * Build : make clean && make
+ * Run   : sudo ./system_monitor
  */
 
 #include <stdlib.h>
@@ -20,42 +33,45 @@
 /* ═══════════════════════════════════════════════════════════════════════
    Configuration
    ═══════════════════════════════════════════════════════════════════════ */
-#define TOTAL_PAGES      5
-#define REFRESH_SECS     3       /* auto-refresh interval                 */
-#define DEBOUNCE_MS      220     /* key debounce window                   */
-#define PIHOLE_HOST      "http://localhost"
-#define PIHOLE_PASS      "I7IUjMRb"
-#define MAX_TOP          5
-#define SID_LEN          128
-#define RSP_SZ           8192
-#define CMD_SZ           640
+#define TOTAL_PAGES   5
+#define REFRESH_SECS  3       /* seconds between auto-refresh              */
+#define DEBOUNCE_MS   220     /* key debounce window in ms                 */
+#define PIHOLE_HOST   "http://localhost"
+#define PIHOLE_PASS   "I7IUjMRb"
+#define MAX_TOP       5
+#define SID_LEN       128
+#define RSP_SZ        8192
+#define CMD_SZ        640
+
+#define W  LCD_WIDTH   /* 128 */
+#define H  LCD_HEIGHT  /* 128 */
 
 /* ═══════════════════════════════════════════════════════════════════════
    Global state
    ═══════════════════════════════════════════════════════════════════════ */
-static UWORD *g_img      = NULL;
-static int    g_page     = 0;
-static int    g_bl_idx   = 1;           /* brightness index 0‥2          */
+static UWORD *g_img    = NULL;
+static int    g_page   = 0;
+static int    g_bl_idx = 1;
 static volatile int g_run = 1;
 
 static const int BL_VALS[3] = { 20, 60, 100 };
 
 /* Pi-hole ─────────────────────────────────────────────────────────────── */
-static char  g_sid[SID_LEN]  = {0};
-static int   g_ph_blocking   = 1;
-static long  g_ph_total      = -1;
-static long  g_ph_blocked    = -1;
-static float g_ph_pct        = 0.0f;
-static long  g_ph_list       = 0;
-static int   g_ph_clients    = 0;
+static char  g_sid[SID_LEN] = {0};
+static int   g_ph_blocking  = 1;
+static long  g_ph_total     = -1;
+static long  g_ph_blocked   = -1;
+static float g_ph_pct       = 0.0f;
+static long  g_ph_list      = 0;
+static int   g_ph_clients   = 0;
 
-static char  g_dom[MAX_TOP][64];
-static long  g_dom_cnt[MAX_TOP];
-static int   g_dom_n         = 0;
+static char g_dom[MAX_TOP][64];
+static long g_dom_cnt[MAX_TOP];
+static int  g_dom_n = 0;
 
-static char  g_cli[MAX_TOP][64];
-static long  g_cli_cnt[MAX_TOP];
-static int   g_cli_n         = 0;
+static char g_cli[MAX_TOP][64];
+static long g_cli_cnt[MAX_TOP];
+static int  g_cli_n = 0;
 
 /* Debounce ────────────────────────────────────────────────────────────── */
 #define NK 8
@@ -85,10 +101,7 @@ static void run_cmd(const char *cmd, char *out, size_t out_sz)
     pclose(fp);
 }
 
-/* ── Minimal JSON helpers (no library needed) ─────────────────────────── */
-
-/* Locate the first occurrence of "key": inside a JSON object starting at p.
-   Returns pointer to the value portion, or NULL.                          */
+/* ── Minimal JSON helpers ─────────────────────────────────────────────── */
 static const char *jval(const char *p, const char *key)
 {
     char needle[80];
@@ -100,7 +113,6 @@ static const char *jval(const char *p, const char *key)
     return p;
 }
 
-/* Extract a long integer from a nested path "parent" → "key"             */
 static long jlong(const char *json, const char *parent, const char *key)
 {
     const char *p = jval(json, parent);
@@ -110,7 +122,6 @@ static long jlong(const char *json, const char *parent, const char *key)
     return strtol(p, NULL, 10);
 }
 
-/* Extract a float from a nested path                                      */
 static float jfloat(const char *json, const char *parent, const char *key)
 {
     const char *p = jval(json, parent);
@@ -120,7 +131,6 @@ static float jfloat(const char *json, const char *parent, const char *key)
     return strtof(p, NULL);
 }
 
-/* Extract a flat string value: "key":"<value>"                            */
 static void jstr(const char *json, const char *key, char *out, int out_len)
 {
     out[0] = 0;
@@ -135,7 +145,6 @@ static void jstr(const char *json, const char *key, char *out, int out_len)
     out[n] = 0;
 }
 
-/* Extract a flat boolean: "key":true/false  → 1/0                        */
 static int jbool(const char *json, const char *key)
 {
     const char *p = jval(json, key);
@@ -144,7 +153,7 @@ static int jbool(const char *json, const char *key)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   System stats via shell
+   System stats
    ═══════════════════════════════════════════════════════════════════════ */
 static void get_cpu(char *b, int n)
 {
@@ -172,8 +181,6 @@ static void get_uptime(char *b, int n)
     run_cmd("uptime -p | sed 's/up //'", b, (size_t)n);
     b[strcspn(b, "\n")] = 0;
     if (!b[0]) strcpy(b, "N/A");
-    /* Shorten to fit: "2 hours, 15 minutes" → "2h 15m" */
-    /* Keep it simple – just truncate at 18 chars         */
     if ((int)strlen(b) > 18) b[18] = 0;
 }
 
@@ -198,68 +205,53 @@ static void get_ts_ip(char *b, int n)
 /* ═══════════════════════════════════════════════════════════════════════
    Pi-hole v6 API
    ═══════════════════════════════════════════════════════════════════════ */
-
-/* Build the common curl prefix with optional SID header                  */
-static void curl_prefix(char *buf, size_t sz, const char *method,
-                         const char *path, const char *extra)
+static void curl_cmd(char *buf, size_t sz, const char *method,
+                     const char *path, const char *extra)
 {
-    if (g_sid[0]) {
-        snprintf(buf, sz,
-            "curl -sm5 -X %s %s%s -H 'sid: %s' %s 2>/dev/null",
-            method, PIHOLE_HOST, path, g_sid, extra ? extra : "");
-    } else {
-        snprintf(buf, sz,
-            "curl -sm5 -X %s %s%s %s 2>/dev/null",
-            method, PIHOLE_HOST, path, extra ? extra : "");
-    }
+    if (g_sid[0])
+        snprintf(buf, sz, "curl -sm5 -X %s %s%s -H 'sid: %s' %s 2>/dev/null",
+                 method, PIHOLE_HOST, path, g_sid, extra ? extra : "");
+    else
+        snprintf(buf, sz, "curl -sm5 -X %s %s%s %s 2>/dev/null",
+                 method, PIHOLE_HOST, path, extra ? extra : "");
 }
 
 static void ph_auth(void)
 {
-    char cmd[CMD_SZ];
-    char rsp[512] = {0};
-
+    char cmd[CMD_SZ], rsp[512] = {0};
     snprintf(cmd, sizeof(cmd),
         "curl -sm5 -X POST %s/api/auth "
         "-H 'Content-Type: application/json' "
         "-d '{\"password\":\"%s\"}' 2>/dev/null",
         PIHOLE_HOST, PIHOLE_PASS);
-
     run_cmd(cmd, rsp, sizeof(rsp));
-
-    /* Response: {"session":{"sid":"<value>",...},...} */
     const char *p = jval(rsp, "session");
-    if (p && *p == '{') {
+    if (p && *p == '{')
         jstr(p, "sid", g_sid, SID_LEN);
-    }
 }
 
 static void ph_fetch_summary(void)
 {
     char cmd[CMD_SZ], rsp[RSP_SZ];
-    curl_prefix(cmd, sizeof(cmd), "GET", "/api/stats/summary", NULL);
+    curl_cmd(cmd, sizeof(cmd), "GET", "/api/stats/summary", NULL);
     run_cmd(cmd, rsp, sizeof(rsp));
-
     if (!strstr(rsp, "\"queries\"")) {
-        /* Auth may have expired – try once more                          */
         ph_auth();
-        curl_prefix(cmd, sizeof(cmd), "GET", "/api/stats/summary", NULL);
+        curl_cmd(cmd, sizeof(cmd), "GET", "/api/stats/summary", NULL);
         run_cmd(cmd, rsp, sizeof(rsp));
     }
-
     if (!strstr(rsp, "\"queries\"")) return;
-
-    g_ph_total   = jlong(rsp,  "queries",  "total");
-    g_ph_blocked = jlong(rsp,  "queries",  "blocked");
-    g_ph_pct     = jfloat(rsp, "queries",  "percent_blocked");
-    g_ph_list    = jlong(rsp,  "gravity",  "domains_being_blocked");
-    g_ph_clients = (int)jlong(rsp, "clients", "active");
+    g_ph_total    = jlong(rsp,  "queries", "total");
+    g_ph_blocked  = jlong(rsp,  "queries", "blocked");
+    g_ph_pct      = jfloat(rsp, "queries", "percent_blocked");
+    g_ph_list     = jlong(rsp,  "gravity", "domains_being_blocked");
+    g_ph_clients  = (int)jlong(rsp, "clients", "active");
 }
 
 static void ph_fetch_blocking(void)
 {
     char cmd[CMD_SZ], rsp[512];
-    curl_prefix(cmd, sizeof(cmd), "GET", "/api/dns/blocking", NULL);
+    curl_cmd(cmd, sizeof(cmd), "GET", "/api/dns/blocking", NULL);
     run_cmd(cmd, rsp, sizeof(rsp));
     if (strstr(rsp, "\"blocking\""))
         g_ph_blocking = jbool(rsp, "blocking");
@@ -269,26 +261,21 @@ static void ph_toggle(void)
 {
     char cmd[CMD_SZ];
     g_ph_blocking = !g_ph_blocking;
-
-    char body[80];
+    char body[96];
     snprintf(body, sizeof(body),
         "-H 'Content-Type: application/json' -d '{\"blocking\":%s,\"timer\":null}'",
         g_ph_blocking ? "true" : "false");
-    curl_prefix(cmd, sizeof(cmd), "POST", "/api/dns/blocking", body);
-
-    /* Append >/dev/null to discard output */
-    size_t n = strlen(cmd);
-    snprintf(cmd + n, sizeof(cmd) - n, " >/dev/null");
+    curl_cmd(cmd, sizeof(cmd), "POST", "/api/dns/blocking", body);
+    strncat(cmd, " >/dev/null", sizeof(cmd) - strlen(cmd) - 1);
     system(cmd);
 }
 
 static void ph_fetch_top_domains(void)
 {
     char cmd[CMD_SZ], rsp[RSP_SZ];
-    curl_prefix(cmd, sizeof(cmd), "GET",
-        "/api/stats/database/top_domains?blocked=true&count=5", NULL);
+    curl_cmd(cmd, sizeof(cmd), "GET",
+             "/api/stats/database/top_domains?blocked=true&count=5", NULL);
     run_cmd(cmd, rsp, sizeof(rsp));
-
     g_dom_n = 0;
     const char *p = rsp;
     for (int i = 0; i < MAX_TOP; i++) {
@@ -297,13 +284,10 @@ static void ph_fetch_top_domains(void)
         p += 10;
         const char *end = strchr(p, '"');
         if (!end) break;
-
         int len = (int)(end - p);
         if (len >= 64) len = 63;
         memcpy(g_dom[i], p, (size_t)len);
         g_dom[i][len] = 0;
-
-        /* count field comes right after in the same object              */
         const char *cnt = strstr(end, "\"count\":");
         const char *nxt = strstr(end + 1, "\"domain\":");
         if (cnt && (!nxt || cnt < nxt)) {
@@ -321,43 +305,21 @@ static void ph_fetch_top_domains(void)
 static void ph_fetch_top_clients(void)
 {
     char cmd[CMD_SZ], rsp[RSP_SZ];
-    curl_prefix(cmd, sizeof(cmd), "GET",
-        "/api/stats/database/top_clients?count=5", NULL);
+    curl_cmd(cmd, sizeof(cmd), "GET",
+             "/api/stats/database/top_clients?count=5", NULL);
     run_cmd(cmd, rsp, sizeof(rsp));
-
     g_cli_n = 0;
     const char *p = rsp;
     for (int i = 0; i < MAX_TOP; i++) {
-        /* Prefer hostname ("name"), fall back to IP ("ip")              */
-        const char *np = strstr(p, "\"name\":\"");
-        const char *ip = strstr(p, "\"ip\":\"");
-
-        const char *use = NULL;
-        int skip = 0;
-        if (np && ip) {
-            use = (np < ip) ? np + 8 : ip + 6;
-            skip = (np < ip) ? 0 : 0;
-        } else if (ip) {
-            use = ip + 6;
-        } else if (np) {
-            use = np + 8;
-        } else {
-            break;
-        }
-        (void)skip;
-
-        /* Fall back – always use "ip" for determinism                   */
         p = strstr(p, "\"ip\":\"");
         if (!p) break;
         p += 6;
         const char *end = strchr(p, '"');
         if (!end) break;
-
         int len = (int)(end - p);
         if (len >= 64) len = 63;
         memcpy(g_cli[i], p, (size_t)len);
         g_cli[i][len] = 0;
-
         const char *cnt = strstr(end, "\"count\":");
         const char *nxt = strstr(end + 1, "\"ip\":");
         if (cnt && (!nxt || cnt < nxt)) {
@@ -382,26 +344,26 @@ static void fetch_pihole(void)
 
 /* ═══════════════════════════════════════════════════════════════════════
    Drawing helpers
-   (128×128 canvas, ROTATE_90 applied in Paint_NewImage)
+   Canvas: 128×128, ROTATE_0, BLACK background
+   Paint_DrawString_EN(x,y,s,font, BG_COLOR, TEXT_COLOR)  ← library quirk
    ═══════════════════════════════════════════════════════════════════════ */
-#define W   128
-#define H   128
-#define HDR_H  15   /* header bar height                                  */
-#define FTR_Y  119  /* footer / page-indicator Y                          */
+#define HDR_H   15   /* header bar height in pixels */
+#define FTR_Y  119   /* footer Y start              */
 
-/* Centered string using Font8 (5px wide per char)                        */
-static void draw_str_c8(int y, const char *s, UWORD fg, UWORD bg)
+/* Draw centred text with Font8 (5 px/char ≈ 6 px advance) */
+static void draw_hdr_text(int y, const char *s, UWORD hdr_color)
 {
-    int w = (int)strlen(s) * 6;  /* approximate advance 6px per char      */
-    int x = (W - w) / 2;
+    int tw = (int)strlen(s) * 6;
+    int x  = (W - tw) / 2;
     if (x < 2) x = 2;
-    Paint_DrawString_EN(x, y, s, &Font8, fg, bg);
+    /* hdr_color = non-text bg (matches filled rect), BLACK = text */
+    Paint_DrawString_EN(x, y, s, &Font8, hdr_color, BLACK);
 }
 
 static void draw_header(const char *title, UWORD color)
 {
     Paint_DrawRectangle(0, 0, W - 1, HDR_H, color, DOT_PIXEL_1X1, DRAW_FILL_FULL);
-    draw_str_c8(3, title, BLACK, color);
+    draw_hdr_text(3, title, color);
 }
 
 static void draw_bar(int x, int y, int w, int h,
@@ -419,14 +381,13 @@ static void draw_bar(int x, int y, int w, int h,
 
 static void draw_footer(void)
 {
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d/%d", g_page + 1, TOTAL_PAGES);
-    /* right-aligned */
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d/%d", (int)(g_page + 1), (int)TOTAL_PAGES);
     int x = W - (int)strlen(buf) * 6 - 2;
-    Paint_DrawString_EN(x, FTR_Y, buf, &Font8, GRAY, BLACK);
+    /* BLACK bg, GRAY text */
+    Paint_DrawString_EN(x, FTR_Y, buf, &Font8, BLACK, GRAY);
 }
 
-/* Truncate a string to at most max_chars characters (in-place copy)      */
 static void trunc_str(const char *src, char *dst, int max_chars)
 {
     strncpy(dst, src, (size_t)max_chars);
@@ -439,38 +400,32 @@ static void trunc_str(const char *src, char *dst, int max_chars)
 static void draw_page_system(void)
 {
     char cpu[16], ram[16], temp[16], up[24], line[48];
-
     get_cpu(cpu, sizeof(cpu));
     get_ram(ram, sizeof(ram));
     get_temp(temp, sizeof(temp));
     get_uptime(up, sizeof(up));
 
     draw_header("SYSTEM STATS", CYAN);
+    int y = HDR_H + 4;  /* 19 */
 
-    int y = HDR_H + 4;
-
-    /* CPU */
     snprintf(line, sizeof(line), "CPU  %s%%", cpu);
-    Paint_DrawString_EN(4, y, line, &Font12, WHITE, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
     y += 13;
     draw_bar(4, y, 120, 7, atoi(cpu), 100, GREEN);
     y += 11;
 
-    /* RAM */
     snprintf(line, sizeof(line), "RAM  %s%%", ram);
-    Paint_DrawString_EN(4, y, line, &Font12, WHITE, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
     y += 13;
     draw_bar(4, y, 120, 7, atoi(ram), 100, BLUE);
     y += 11;
 
-    /* Temperature */
     snprintf(line, sizeof(line), "Temp %s C", temp);
-    Paint_DrawString_EN(4, y, line, &Font12, YELLOW, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, YELLOW);
     y += 14;
 
-    /* Uptime */
     snprintf(line, sizeof(line), "Up: %s", up);
-    Paint_DrawString_EN(4, y, line, &Font8, GRAY, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font8, BLACK, GRAY);
 
     draw_footer();
 }
@@ -481,23 +436,21 @@ static void draw_page_system(void)
 static void draw_page_network(void)
 {
     char wip[32], uip[32], tip[32];
-
     get_ip("wlan0", wip, sizeof(wip));
     get_ip("usb0",  uip, sizeof(uip));
     get_ts_ip(tip,  sizeof(tip));
 
-    draw_header("NETWORK", 0x07E0 /* GREEN */);
-
+    draw_header("NETWORK", GREEN);
     int y = HDR_H + 5;
 
-    Paint_DrawString_EN(4, y, "WiFi IP", &Font8, GRAY, BLACK);  y += 10;
-    Paint_DrawString_EN(4, y, wip, &Font12, YELLOW, BLACK);      y += 16;
+    Paint_DrawString_EN(4, y, "WiFi IP", &Font8, BLACK, GRAY);   y += 10;
+    Paint_DrawString_EN(4, y, wip, &Font12, BLACK, YELLOW);       y += 16;
 
-    Paint_DrawString_EN(4, y, "USB IP", &Font8, GRAY, BLACK);   y += 10;
-    Paint_DrawString_EN(4, y, uip, &Font12, CYAN, BLACK);        y += 16;
+    Paint_DrawString_EN(4, y, "USB IP", &Font8, BLACK, GRAY);    y += 10;
+    Paint_DrawString_EN(4, y, uip, &Font12, BLACK, CYAN);         y += 16;
 
-    Paint_DrawString_EN(4, y, "Tailscale", &Font8, GRAY, BLACK); y += 10;
-    Paint_DrawString_EN(4, y, tip, &Font12, GBLUE, BLACK);
+    Paint_DrawString_EN(4, y, "Tailscale", &Font8, BLACK, GRAY);  y += 10;
+    Paint_DrawString_EN(4, y, tip, &Font12, BLACK, GBLUE);
 
     draw_footer();
 }
@@ -508,41 +461,38 @@ static void draw_page_network(void)
 static void draw_page_pihole(void)
 {
     char line[48];
-
     draw_header("PI-HOLE", RED);
-
     int y = HDR_H + 4;
 
-    /* Blocking status badge */
     const char *state_str = g_ph_blocking ? "ENABLED " : "DISABLED";
     UWORD state_col = g_ph_blocking ? GREEN : RED;
     snprintf(line, sizeof(line), "Block: %s", state_str);
-    Paint_DrawString_EN(4, y, line, &Font12, state_col, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, state_col);
     y += 16;
 
     if (g_ph_total < 0) {
-        Paint_DrawString_EN(4, y, "Fetching...", &Font12, GRAY, BLACK);
+        Paint_DrawString_EN(4, y, "Fetching...", &Font12, BLACK, GRAY);
         draw_footer();
         return;
     }
 
     snprintf(line, sizeof(line), "Total: %ld", g_ph_total);
-    Paint_DrawString_EN(4, y, line, &Font12, WHITE, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
     y += 14;
 
     snprintf(line, sizeof(line), "Block: %ld", g_ph_blocked);
-    Paint_DrawString_EN(4, y, line, &Font12, RED, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, RED);
     y += 14;
 
     snprintf(line, sizeof(line), "Rate:  %.1f%%", g_ph_pct);
-    Paint_DrawString_EN(4, y, line, &Font12, YELLOW, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, YELLOW);
     y += 14;
 
     if (g_ph_list > 0)
         snprintf(line, sizeof(line), "List: %ldK", g_ph_list / 1000);
     else
         snprintf(line, sizeof(line), "List: N/A");
-    Paint_DrawString_EN(4, y, line, &Font8, GRAY, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font8, BLACK, GRAY);
 
     draw_footer();
 }
@@ -553,13 +503,11 @@ static void draw_page_pihole(void)
 static void draw_page_top_blocked(void)
 {
     char line[48];
-
     draw_header("TOP BLOCKED", RED);
-
     int y = HDR_H + 4;
 
     if (g_dom_n == 0) {
-        Paint_DrawString_EN(4, y + 20, "No data yet", &Font12, GRAY, BLACK);
+        Paint_DrawString_EN(4, y + 20, "No data yet", &Font12, BLACK, GRAY);
         draw_footer();
         return;
     }
@@ -567,16 +515,13 @@ static void draw_page_top_blocked(void)
     for (int i = 0; i < g_dom_n && i < MAX_TOP; i++) {
         char dom[19];
         trunc_str(g_dom[i], dom, 18);
-
         snprintf(line, sizeof(line), "%d.%s", i + 1, dom);
-        Paint_DrawString_EN(4, y, line, &Font8, CYAN, BLACK);
+        Paint_DrawString_EN(4, y, line, &Font8, BLACK, CYAN);
         y += 9;
-
         snprintf(line, sizeof(line), "   %ld hits", g_dom_cnt[i]);
-        Paint_DrawString_EN(4, y, line, &Font8, GRAY, BLACK);
+        Paint_DrawString_EN(4, y, line, &Font8, BLACK, GRAY);
         y += 10;
     }
-
     draw_footer();
 }
 
@@ -586,20 +531,18 @@ static void draw_page_top_blocked(void)
 static void draw_page_clients(void)
 {
     char line[48];
-
     draw_header("CLIENTS", CYAN);
-
     int y = HDR_H + 4;
 
     snprintf(line, sizeof(line), "Active: %d", g_ph_clients);
-    Paint_DrawString_EN(4, y, line, &Font12, GREEN, BLACK);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, GREEN);
     y += 16;
 
     Paint_DrawLine(4, y, W - 4, y, GRAY, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
     y += 5;
 
     if (g_cli_n == 0) {
-        Paint_DrawString_EN(4, y + 10, "No data yet", &Font12, GRAY, BLACK);
+        Paint_DrawString_EN(4, y + 10, "No data yet", &Font12, BLACK, GRAY);
         draw_footer();
         return;
     }
@@ -607,16 +550,13 @@ static void draw_page_clients(void)
     for (int i = 0; i < g_cli_n && i < 3; i++) {
         char cli[17];
         trunc_str(g_cli[i], cli, 16);
-
         snprintf(line, sizeof(line), "%d. %s", i + 1, cli);
-        Paint_DrawString_EN(4, y, line, &Font8, WHITE, BLACK);
+        Paint_DrawString_EN(4, y, line, &Font8, BLACK, WHITE);
         y += 9;
-
         snprintf(line, sizeof(line), "   %ld qry", g_cli_cnt[i]);
-        Paint_DrawString_EN(4, y, line, &Font8, GRAY, BLACK);
+        Paint_DrawString_EN(4, y, line, &Font8, BLACK, GRAY);
         y += 11;
     }
-
     draw_footer();
 }
 
@@ -625,7 +565,8 @@ static void draw_page_clients(void)
    ═══════════════════════════════════════════════════════════════════════ */
 static void render(void)
 {
-    Paint_NewImage(g_img, W, H, ROTATE_90, BLACK, 16);
+    /* Use SCAN_DIR_DFT + rotate 0 — matches Waveshare example exactly   */
+    Paint_NewImage(g_img, W, H, 0, BLACK, 16);
     Paint_Clear(BLACK);
 
     switch (g_page) {
@@ -641,13 +582,11 @@ static void render(void)
 
 /* ═══════════════════════════════════════════════════════════════════════
    Input  –  non-blocking, debounced
-   Returns 1 if the display needs a redraw, 0 otherwise.
    ═══════════════════════════════════════════════════════════════════════ */
 static int key_fired(int id)
 {
     long now = millis();
     if (now - g_key_ms[id] < DEBOUNCE_MS) return 0;
-
     int pressed = 0;
     switch (id) {
         case K_UP:    pressed = (GET_KEY_UP    == 0); break;
@@ -677,40 +616,31 @@ static int handle_input(void)
         if (g_page >= 2) fetch_pihole();
         redraw = 1;
     }
-
-    /* KEY1 – toggle Pi-hole blocking */
-    if (key_fired(K_B1)) {
+    if (key_fired(K_B1)) {          /* toggle Pi-hole */
         ph_toggle();
         redraw = 1;
     }
-
-    /* KEY2 – force refresh */
-    if (key_fired(K_B2)) {
+    if (key_fired(K_B2)) {          /* force refresh */
         if (g_page >= 2) fetch_pihole();
         redraw = 1;
     }
-
-    /* KEY3 – cycle brightness */
-    if (key_fired(K_B3)) {
+    if (key_fired(K_B3)) {          /* cycle brightness */
         g_bl_idx = (g_bl_idx + 1) % 3;
         LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
     }
-
     return redraw;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Signal handler
+   Signal handler + main
    ═══════════════════════════════════════════════════════════════════════ */
 static void sig_handler(int s) { (void)s; g_run = 0; }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   main
-   ═══════════════════════════════════════════════════════════════════════ */
 int main(void)
 {
-    printf("=== Pi Zero 2W Interactive Dashboard ===\n");
-    printf("Up/Down: navigate  KEY1: Pi-hole  KEY2: refresh  KEY3: brightness\n");
+    printf("=== Pi Zero 2W Dashboard ===\n");
+    printf("Buttons not working? Add to /boot/config.txt:\n");
+    printf("  gpio=6,19,5,26,13,21,20,16=pu  then reboot\n\n");
 
     signal(SIGINT,  sig_handler);
     signal(SIGTERM, sig_handler);
@@ -720,10 +650,12 @@ int main(void)
         return 1;
     }
 
-    LCD_1in44_Init(HORIZONTAL);
+    /* Use SCAN_DIR_DFT (U2D_R2L) – same as Waveshare C example */
+    LCD_1in44_Init(SCAN_DIR_DFT);
     LCD_1in44_Clear(BLACK);
 
-    g_img = (UWORD *)malloc((size_t)(W * H) * sizeof(UWORD));
+    UDOUBLE img_bytes = (UDOUBLE)W * H * 2;
+    g_img = (UWORD *)malloc(img_bytes);
     if (!g_img) {
         fprintf(stderr, "malloc failed\n");
         DEV_ModuleExit();
@@ -732,25 +664,19 @@ int main(void)
 
     LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
 
-    /* ── Bootstrap Pi-hole connection ─────────────────────────────────── */
     printf("Authenticating to Pi-hole...\n");
     ph_auth();
-    if (g_sid[0])
-        printf("Pi-hole auth OK  sid=%.8s...\n", g_sid);
-    else
-        printf("Pi-hole auth skipped (no password required or unreachable)\n");
+    printf(g_sid[0] ? "Pi-hole auth OK\n" : "Pi-hole: no auth needed / unreachable\n");
 
     printf("Fetching initial data...\n");
     ph_fetch_summary();
     ph_fetch_blocking();
 
-    /* ── Main loop ─────────────────────────────────────────────────────── */
     time_t last_refresh = time(NULL);
     int need_draw = 1;
 
     while (g_run) {
-        int inp = handle_input();
-        if (inp) need_draw = 1;
+        if (handle_input()) need_draw = 1;
 
         time_t now = time(NULL);
         if (now - last_refresh >= REFRESH_SECS) {
@@ -767,11 +693,9 @@ int main(void)
         DEV_Delay_ms(50);
     }
 
-    /* ── Cleanup ─────────────────────────────────────────────────────────*/
     printf("\nShutting down...\n");
     LCD_1in44_Clear(BLACK);
     free(g_img);
     DEV_ModuleExit();
-    printf("Done.\n");
     return 0;
 }
