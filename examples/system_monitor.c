@@ -36,6 +36,7 @@
 #define TOTAL_PAGES   5
 #define REFRESH_SECS  3       /* seconds between auto-refresh              */
 #define DEBOUNCE_MS   100     /* key debounce window in ms                 */
+#define DIM_SECS      45      /* dim backlight after this many seconds idle */
 #define SLEEP_SECS    60      /* blank display after this many seconds idle */
 #define PIHOLE_HOST   "http://localhost"
 #define PIHOLE_PASS   "I7IUjMRb"
@@ -76,6 +77,7 @@ static int  g_cli_n = 0;
 
 /* Sleep / activity tracking ──────────────────────────────────────────── */
 static int    g_sleeping      = 0;
+static int    g_dimmed        = 0;
 static time_t g_last_activity = 0;
 static int    g_need_fetch    = 0;  /* set by handle_input, cleared after fetch */
 
@@ -206,6 +208,13 @@ static void get_ts_ip(char *b, int n)
     run_cmd("tailscale ip -4 2>/dev/null", b, (size_t)n);
     b[strcspn(b, "\n")] = 0;
     if (!b[0]) strcpy(b, "N/A");
+}
+
+static void get_disk(char *b, int n)
+{
+    run_cmd("df / | tail -1 | awk '{print $5}' | tr -d '%'", b, (size_t)n);
+    b[strcspn(b, "\n")] = 0;
+    if (!b[0]) strcpy(b, "0");
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -387,10 +396,17 @@ static void draw_bar(int x, int y, int w, int h,
 
 static void draw_footer(void)
 {
-    char buf[16];
+    /* left: HH:MM */
+    time_t t = time(NULL);
+    struct tm *tm_info = localtime(&t);
+    char tbuf[8];
+    snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tm_info->tm_hour, tm_info->tm_min);
+    Paint_DrawString_EN(2, FTR_Y, tbuf, &Font8, BLACK, GRAY);
+
+    /* right: page n/N */
+    char buf[8];
     snprintf(buf, sizeof(buf), "%d/%d", (int)(g_page + 1), (int)TOTAL_PAGES);
     int x = W - (int)strlen(buf) * 6 - 2;
-    /* BLACK bg, GRAY text */
     Paint_DrawString_EN(x, FTR_Y, buf, &Font8, BLACK, GRAY);
 }
 
@@ -405,30 +421,39 @@ static void trunc_str(const char *src, char *dst, int max_chars)
    ═══════════════════════════════════════════════════════════════════════ */
 static void draw_page_system(void)
 {
-    char cpu[16], ram[16], temp[16], up[24], line[48];
+    char cpu[16], ram[16], temp[16], disk[16], up[24], line[48];
     get_cpu(cpu, sizeof(cpu));
     get_ram(ram, sizeof(ram));
     get_temp(temp, sizeof(temp));
+    get_disk(disk, sizeof(disk));
     get_uptime(up, sizeof(up));
 
     draw_header("SYSTEM STATS", CYAN);
-    int y = HDR_H + 4;  /* 19 */
+    int y = HDR_H + 3;  /* 18 */
 
     snprintf(line, sizeof(line), "CPU  %s%%", cpu);
     Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
-    y += 13;
-    draw_bar(4, y, 120, 7, atoi(cpu), 100, GREEN);
-    y += 11;
+    y += 12;
+    draw_bar(4, y, 120, 6, atoi(cpu), 100, GREEN);
+    y += 10;
 
     snprintf(line, sizeof(line), "RAM  %s%%", ram);
     Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
-    y += 13;
-    draw_bar(4, y, 120, 7, atoi(ram), 100, BLUE);
-    y += 11;
+    y += 12;
+    draw_bar(4, y, 120, 6, atoi(ram), 100, BLUE);
+    y += 10;
 
+    snprintf(line, sizeof(line), "Disk %s%%", disk);
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
+    y += 12;
+    draw_bar(4, y, 120, 6, atoi(disk), 100, YELLOW);
+    y += 10;
+
+    int t_val = (int)(atof(temp));
+    UWORD t_col = (t_val >= 70) ? RED : (t_val >= 55 ? YELLOW : GREEN);
     snprintf(line, sizeof(line), "Temp %s C", temp);
-    Paint_DrawString_EN(4, y, line, &Font12, BLACK, YELLOW);
-    y += 14;
+    Paint_DrawString_EN(4, y, line, &Font12, BLACK, t_col);
+    y += 12;
 
     snprintf(line, sizeof(line), "Up: %s", up);
     Paint_DrawString_EN(4, y, line, &Font8, BLACK, GRAY);
@@ -610,22 +635,32 @@ static int key_fired(int id)
 
 static int handle_input(void)
 {
-    /* Poll all keys first so debounce timestamps are updated in one pass */
+    /* Poll all keys in one pass */
     int up    = key_fired(K_UP);
     int down  = key_fired(K_DOWN);
+    int left  = key_fired(K_LEFT);
+    int right = key_fired(K_RIGHT);
+    int press = key_fired(K_PRESS);
     int b1    = key_fired(K_B1);
     int b2    = key_fired(K_B2);
     int b3    = key_fired(K_B3);
 
-    if (!(up || down || b1 || b2 || b3)) return 0;
+    if (!(up || down || left || right || press || b1 || b2 || b3)) return 0;
 
     g_last_activity = time(NULL);
 
-    /* Any press while sleeping wakes the display; don't process the action */
+    /* Press while sleeping: wake display, don't process action */
     if (g_sleeping) {
         g_sleeping = 0;
+        g_dimmed   = 0;
         LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
         return 1;
+    }
+
+    /* Press while dimmed: restore brightness, then process action normally */
+    if (g_dimmed) {
+        g_dimmed = 0;
+        LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
     }
 
     int redraw = 0;
@@ -640,15 +675,28 @@ static int handle_input(void)
         if (g_page >= 2) g_need_fetch = 1;
         redraw = 1;
     }
-    if (b1) {                        /* toggle Pi-hole */
-        ph_toggle();
+    if (left) {                      /* home: jump to page 1 */
+        g_page = 0;
         redraw = 1;
     }
-    if (b2) {                        /* force refresh */
+    if (right) {                     /* end: jump to last page */
+        g_page = TOTAL_PAGES - 1;
+        g_need_fetch = 1;
+        redraw = 1;
+    }
+    if (press) {                     /* joystick press: force refresh */
         if (g_page >= 2) g_need_fetch = 1;
         redraw = 1;
     }
-    if (b3) {                        /* cycle brightness */
+    if (b1) {                        /* KEY1: toggle Pi-hole */
+        ph_toggle();
+        redraw = 1;
+    }
+    if (b2) {                        /* KEY2: force refresh */
+        if (g_page >= 2) g_need_fetch = 1;
+        redraw = 1;
+    }
+    if (b3) {                        /* KEY3: cycle brightness */
         g_bl_idx = (g_bl_idx + 1) % 3;
         LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
     }
@@ -722,11 +770,18 @@ int main(void)
             need_draw = 1;
         }
 
-        /* --- sleep timeout --- */
-        if (!g_sleeping && (now_t - g_last_activity) >= SLEEP_SECS) {
-            g_sleeping = 1;
-            LCD_SetBacklight(0);
-            need_draw = 0;
+        /* --- dim / sleep timeout --- */
+        if (!g_sleeping) {
+            long idle = (long)(now_t - g_last_activity);
+            if (idle >= SLEEP_SECS) {
+                g_sleeping = 1;
+                g_dimmed   = 0;
+                LCD_SetBacklight(0);
+                need_draw  = 0;
+            } else if (!g_dimmed && idle >= DIM_SECS) {
+                g_dimmed = 1;
+                LCD_SetBacklight((UWORD)BL_VALS[0]); /* dim to minimum */
+            }
         }
 
         /* --- draw --- */

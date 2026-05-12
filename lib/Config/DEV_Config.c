@@ -22,8 +22,8 @@ void *BL_PWM(void *arg){
 		if(i>64)i=0;
         //printf("%s\n", (char *)arg);
         lguSleep(0.001);
-		if(i<(pwm_dule/16))lgGpioWrite(GPIO_Handle, 18, LG_HIGH);
-		else lgGpioWrite(GPIO_Handle, 18, LG_LOW);	
+		if(i<(pwm_dule/16))lgGpioWrite(GPIO_Handle, LCD_BL, LG_HIGH);
+		else lgGpioWrite(GPIO_Handle, LCD_BL, LG_LOW);
     }
 	
 }
