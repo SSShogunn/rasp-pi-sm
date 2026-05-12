@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "Raspberry Pi (Linux ARM)",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/lib/Config",
+                "${workspaceFolder}/lib/GUI",
+                "${workspaceFolder}/lib/LCD",
+                "${workspaceFolder}/lib/Fonts"
+            ],
+            "defines": [
+                "USE_DEV_LIB"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "intelliSenseMode": "linux-gcc-arm",
+            "configurationProvider": "ms-vscode.makefile-tools"
+        }
+    ],
+    "version": 4
+}
