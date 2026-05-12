@@ -99,7 +99,7 @@ void DEV_GPIO_Mode(UWORD Pin, UWORD Mode)
 
 #elif  USE_DEV_LIB  
     if(Mode == 0 || Mode == LG_SET_INPUT){
-        lgGpioClaimInput(GPIO_Handle,LFLAGS,Pin);
+        lgGpioClaimInput(GPIO_Handle, LG_SET_PULL_UP, Pin);
         // printf("IN Pin = %d\r\n",Pin);
     }else{
         lgGpioClaimOutput(GPIO_Handle, LFLAGS, Pin, LG_LOW);

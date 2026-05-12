@@ -23,6 +23,9 @@
     #include <lgpio.h>
     #define LFLAGS 0
     #define NUM_MAXBUF  4
+    #ifndef LG_SET_PULL_UP
+    #define LG_SET_PULL_UP (1<<5)  /* lgpio flag: enable pull-up resistor on input pin */
+    #endif
 #endif
 #include <unistd.h>
 
