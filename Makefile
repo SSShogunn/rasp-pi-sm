@@ -27,8 +27,11 @@ CC = gcc
 MSG = -g -O0 -Wall
 CFLAGS += $(MSG) $(DEBUG)
 
-${TARGET}:${OBJ_O}
+${TARGET}: $(DIR_BIN) ${OBJ_O}
 	$(CC) $(CFLAGS) $(OBJ_O) -o $@ $(LIB)
+
+$(DIR_BIN):
+	mkdir -p $(DIR_BIN)
     
 ${DIR_BIN}/%.o:$(DIR_Examples)/%.c
 	$(CC) $(CFLAGS) -c  $< -o $@ -I $(DIR_Config) -I $(DIR_GUI) -I $(DIR_EPD)
@@ -46,5 +49,5 @@ ${DIR_BIN}/%.o:$(DIR_Config)/%.c
 	$(CC) $(CFLAGS) -c  $< -o $@ $(LIB)
 	
 clean :
-	rm $(DIR_BIN)/*.* 
-	rm $(TARGET) 
+	rm -f $(DIR_BIN)/*.o
+	rm -f $(TARGET)
