@@ -623,11 +623,12 @@ static void render(void)
         case 4: draw_page_clients();     break;
     }
 
-    /* Single bulk SPI write instead of 128 per-row calls.
-     * Reduces CS-toggle overhead and minimises scan-line tearing. */
+    /* Write 16 rows per SPI call (4096 bytes = kernel spidev max).
+     * 8 calls instead of 128, within the transfer size limit. */
     LCD_1in44_SetWindows(0, 0, LCD_WIDTH, LCD_HEIGHT);
     LCD_DC_1;
-    DEV_SPI_Write_nByte((uint8_t *)g_img, (uint32_t)(W * H * 2));
+    for (int row = 0; row < H; row += 16)
+        DEV_SPI_Write_nByte((uint8_t *)&g_img[row * W], 16 * W * 2);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
