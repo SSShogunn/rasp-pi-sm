@@ -35,7 +35,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 #define TOTAL_PAGES   5
 #define REFRESH_SECS  3       /* seconds between auto-refresh              */
-#define DEBOUNCE_MS   220     /* key debounce window in ms                 */
+#define DEBOUNCE_MS   100     /* key debounce window in ms                 */
+#define SLEEP_SECS    60      /* blank display after this many seconds idle */
 #define PIHOLE_HOST   "http://localhost"
 #define PIHOLE_PASS   "I7IUjMRb"
 #define MAX_TOP       5
@@ -54,7 +55,7 @@ static int    g_page   = 0;
 static int    g_bl_idx = 1;
 static volatile int g_run = 1;
 
-static const int BL_VALS[3] = { 20, 60, 100 };
+static const int BL_VALS[3] = { 200, 600, 1024 }; /* lgpio PWM: 0-1024 = 0-100% duty */
 
 /* Pi-hole ─────────────────────────────────────────────────────────────── */
 static char  g_sid[SID_LEN] = {0};
@@ -72,6 +73,11 @@ static int  g_dom_n = 0;
 static char g_cli[MAX_TOP][64];
 static long g_cli_cnt[MAX_TOP];
 static int  g_cli_n = 0;
+
+/* Sleep / activity tracking ──────────────────────────────────────────── */
+static int    g_sleeping      = 0;
+static time_t g_last_activity = 0;
+static int    g_need_fetch    = 0;  /* set by handle_input, cleared after fetch */
 
 /* Debounce ────────────────────────────────────────────────────────────── */
 #define NK 8
@@ -604,27 +610,45 @@ static int key_fired(int id)
 
 static int handle_input(void)
 {
+    /* Poll all keys first so debounce timestamps are updated in one pass */
+    int up    = key_fired(K_UP);
+    int down  = key_fired(K_DOWN);
+    int b1    = key_fired(K_B1);
+    int b2    = key_fired(K_B2);
+    int b3    = key_fired(K_B3);
+
+    if (!(up || down || b1 || b2 || b3)) return 0;
+
+    g_last_activity = time(NULL);
+
+    /* Any press while sleeping wakes the display; don't process the action */
+    if (g_sleeping) {
+        g_sleeping = 0;
+        LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
+        return 1;
+    }
+
     int redraw = 0;
 
-    if (key_fired(K_UP)) {
+    if (up) {
         g_page = (g_page - 1 + TOTAL_PAGES) % TOTAL_PAGES;
-        if (g_page >= 2) fetch_pihole();
+        if (g_page >= 2) g_need_fetch = 1;
         redraw = 1;
     }
-    if (key_fired(K_DOWN)) {
+    if (down) {
         g_page = (g_page + 1) % TOTAL_PAGES;
-        if (g_page >= 2) fetch_pihole();
+        if (g_page >= 2) g_need_fetch = 1;
         redraw = 1;
     }
-    if (key_fired(K_B1)) {          /* toggle Pi-hole */
+    if (b1) {                        /* toggle Pi-hole */
         ph_toggle();
         redraw = 1;
     }
-    if (key_fired(K_B2)) {          /* force refresh */
-        if (g_page >= 2) fetch_pihole();
+    if (b2) {                        /* force refresh */
+        if (g_page >= 2) g_need_fetch = 1;
         redraw = 1;
     }
-    if (key_fired(K_B3)) {          /* cycle brightness */
+    if (b3) {                        /* cycle brightness */
         g_bl_idx = (g_bl_idx + 1) % 3;
         LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
     }
@@ -663,6 +687,7 @@ int main(void)
     }
 
     LCD_SetBacklight((UWORD)BL_VALS[g_bl_idx]);
+    g_last_activity = time(NULL);
 
     printf("Authenticating to Pi-hole...\n");
     ph_auth();
@@ -676,21 +701,41 @@ int main(void)
     int need_draw = 1;
 
     while (g_run) {
-        if (handle_input()) need_draw = 1;
+        /* --- input (render immediately for snappy feedback, fetch after) --- */
+        if (handle_input()) {
+            if (!g_sleeping) render();
+            need_draw = 0;
+        }
 
-        time_t now = time(NULL);
-        if (now - last_refresh >= REFRESH_SECS) {
-            if (g_page >= 2) fetch_pihole();
-            last_refresh = now;
+        /* --- deferred Pi-hole fetch triggered by navigation / KEY2 --- */
+        if (g_need_fetch) {
+            fetch_pihole();
+            g_need_fetch = 0;
             need_draw = 1;
         }
 
-        if (need_draw) {
+        /* --- auto-refresh --- */
+        time_t now_t = time(NULL);
+        if (now_t - last_refresh >= REFRESH_SECS) {
+            if (g_page >= 2 && !g_sleeping) fetch_pihole();
+            last_refresh = now_t;
+            need_draw = 1;
+        }
+
+        /* --- sleep timeout --- */
+        if (!g_sleeping && (now_t - g_last_activity) >= SLEEP_SECS) {
+            g_sleeping = 1;
+            LCD_SetBacklight(0);
+            need_draw = 0;
+        }
+
+        /* --- draw --- */
+        if (need_draw && !g_sleeping) {
             render();
             need_draw = 0;
         }
 
-        DEV_Delay_ms(50);
+        DEV_Delay_ms(20);
     }
 
     printf("\nShutting down...\n");
