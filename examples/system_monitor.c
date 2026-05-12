@@ -75,6 +75,16 @@ static char g_cli[MAX_TOP][64];
 static long g_cli_cnt[MAX_TOP];
 static int  g_cli_n = 0;
 
+/* Cached system / network data (fetched outside render to keep render fast) */
+static char g_cpu[16]    = "--";
+static char g_ram[16]    = "--";
+static char g_temp[16]   = "--";
+static char g_disk[16]   = "--";
+static char g_uptime[24] = "...";
+static char g_wip[32]    = "...";
+static char g_uip[32]    = "...";
+static char g_tip[32]    = "...";
+
 /* Sleep / activity tracking ──────────────────────────────────────────── */
 static int    g_sleeping      = 0;
 static int    g_dimmed        = 0;
@@ -215,6 +225,22 @@ static void get_disk(char *b, int n)
     run_cmd("df / | tail -1 | awk '{print $5}' | tr -d '%'", b, (size_t)n);
     b[strcspn(b, "\n")] = 0;
     if (!b[0]) strcpy(b, "0");
+}
+
+static void fetch_system(void)
+{
+    get_cpu(g_cpu,       sizeof(g_cpu));
+    get_ram(g_ram,       sizeof(g_ram));
+    get_temp(g_temp,     sizeof(g_temp));
+    get_disk(g_disk,     sizeof(g_disk));
+    get_uptime(g_uptime, sizeof(g_uptime));
+}
+
+static void fetch_network(void)
+{
+    get_ip("wlan0", g_wip, sizeof(g_wip));
+    get_ip("usb0",  g_uip, sizeof(g_uip));
+    get_ts_ip(g_tip,     sizeof(g_tip));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -421,41 +447,36 @@ static void trunc_str(const char *src, char *dst, int max_chars)
    ═══════════════════════════════════════════════════════════════════════ */
 static void draw_page_system(void)
 {
-    char cpu[16], ram[16], temp[16], disk[16], up[24], line[48];
-    get_cpu(cpu, sizeof(cpu));
-    get_ram(ram, sizeof(ram));
-    get_temp(temp, sizeof(temp));
-    get_disk(disk, sizeof(disk));
-    get_uptime(up, sizeof(up));
+    char line[48];
 
     draw_header("SYSTEM STATS", CYAN);
-    int y = HDR_H + 3;  /* 18 */
+    int y = HDR_H + 3;
 
-    snprintf(line, sizeof(line), "CPU  %s%%", cpu);
+    snprintf(line, sizeof(line), "CPU  %s%%", g_cpu);
     Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
     y += 12;
-    draw_bar(4, y, 120, 6, atoi(cpu), 100, GREEN);
+    draw_bar(4, y, 120, 6, atoi(g_cpu), 100, GREEN);
     y += 10;
 
-    snprintf(line, sizeof(line), "RAM  %s%%", ram);
+    snprintf(line, sizeof(line), "RAM  %s%%", g_ram);
     Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
     y += 12;
-    draw_bar(4, y, 120, 6, atoi(ram), 100, BLUE);
+    draw_bar(4, y, 120, 6, atoi(g_ram), 100, BLUE);
     y += 10;
 
-    snprintf(line, sizeof(line), "Disk %s%%", disk);
+    snprintf(line, sizeof(line), "Disk %s%%", g_disk);
     Paint_DrawString_EN(4, y, line, &Font12, BLACK, WHITE);
     y += 12;
-    draw_bar(4, y, 120, 6, atoi(disk), 100, YELLOW);
+    draw_bar(4, y, 120, 6, atoi(g_disk), 100, YELLOW);
     y += 10;
 
-    int t_val = (int)(atof(temp));
+    int t_val = (int)(atof(g_temp));
     UWORD t_col = (t_val >= 70) ? RED : (t_val >= 55 ? YELLOW : GREEN);
-    snprintf(line, sizeof(line), "Temp %s C", temp);
+    snprintf(line, sizeof(line), "Temp %s C", g_temp);
     Paint_DrawString_EN(4, y, line, &Font12, BLACK, t_col);
     y += 12;
 
-    snprintf(line, sizeof(line), "Up: %s", up);
+    snprintf(line, sizeof(line), "Up: %s", g_uptime);
     Paint_DrawString_EN(4, y, line, &Font8, BLACK, GRAY);
 
     draw_footer();
@@ -466,22 +487,17 @@ static void draw_page_system(void)
    ═══════════════════════════════════════════════════════════════════════ */
 static void draw_page_network(void)
 {
-    char wip[32], uip[32], tip[32];
-    get_ip("wlan0", wip, sizeof(wip));
-    get_ip("usb0",  uip, sizeof(uip));
-    get_ts_ip(tip,  sizeof(tip));
-
     draw_header("NETWORK", GREEN);
     int y = HDR_H + 5;
 
-    Paint_DrawString_EN(4, y, "WiFi IP", &Font8, BLACK, GRAY);   y += 10;
-    Paint_DrawString_EN(4, y, wip, &Font12, BLACK, YELLOW);       y += 16;
+    Paint_DrawString_EN(4, y, "WiFi IP", &Font8, BLACK, GRAY);    y += 10;
+    Paint_DrawString_EN(4, y, g_wip, &Font12, BLACK, YELLOW);      y += 16;
 
-    Paint_DrawString_EN(4, y, "USB IP", &Font8, BLACK, GRAY);    y += 10;
-    Paint_DrawString_EN(4, y, uip, &Font12, BLACK, CYAN);         y += 16;
+    Paint_DrawString_EN(4, y, "USB IP", &Font8, BLACK, GRAY);     y += 10;
+    Paint_DrawString_EN(4, y, g_uip, &Font12, BLACK, CYAN);        y += 16;
 
-    Paint_DrawString_EN(4, y, "Tailscale", &Font8, BLACK, GRAY);  y += 10;
-    Paint_DrawString_EN(4, y, tip, &Font12, BLACK, GBLUE);
+    Paint_DrawString_EN(4, y, "Tailscale", &Font8, BLACK, GRAY);   y += 10;
+    Paint_DrawString_EN(4, y, g_tip, &Font12, BLACK, GBLUE);
 
     draw_footer();
 }
@@ -596,7 +612,6 @@ static void draw_page_clients(void)
    ═══════════════════════════════════════════════════════════════════════ */
 static void render(void)
 {
-    /* Use SCAN_DIR_DFT + rotate 0 — matches Waveshare example exactly   */
     Paint_NewImage(g_img, W, H, 0, BLACK, 16);
     Paint_Clear(BLACK);
 
@@ -608,7 +623,11 @@ static void render(void)
         case 4: draw_page_clients();     break;
     }
 
-    LCD_1in44_Display(g_img);
+    /* Single bulk SPI write instead of 128 per-row calls.
+     * Reduces CS-toggle overhead and minimises scan-line tearing. */
+    LCD_1in44_SetWindows(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    LCD_DC_1;
+    DEV_SPI_Write_nByte((uint8_t *)g_img, (uint32_t)(W * H * 2));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -742,32 +761,51 @@ int main(void)
     printf(g_sid[0] ? "Pi-hole auth OK\n" : "Pi-hole: no auth needed / unreachable\n");
 
     printf("Fetching initial data...\n");
+    fetch_system();
+    fetch_network();
     ph_fetch_summary();
     ph_fetch_blocking();
 
-    time_t last_refresh = time(NULL);
+    /* Separate refresh timers per data source — initialised to 0 so the
+     * first pass triggers an immediate fetch for the active page.        */
+    time_t last_sys_refresh = time(NULL);
+    time_t last_ph_refresh  = time(NULL);
     int need_draw = 1;
 
     while (g_run) {
-        /* --- input (render immediately for snappy feedback, fetch after) --- */
+        /* --- input: render first, fetch after (snappy feedback) --- */
         if (handle_input()) {
             if (!g_sleeping) render();
             need_draw = 0;
         }
 
-        /* --- deferred Pi-hole fetch triggered by navigation / KEY2 --- */
+        /* --- deferred Pi-hole fetch (navigation / KEY2 / joystick press) --- */
         if (g_need_fetch) {
             fetch_pihole();
-            g_need_fetch = 0;
-            need_draw = 1;
+            g_need_fetch       = 0;
+            last_ph_refresh    = time(NULL);
+            need_draw          = 1;
         }
 
-        /* --- auto-refresh --- */
         time_t now_t = time(NULL);
-        if (now_t - last_refresh >= REFRESH_SECS) {
-            if (g_page >= 2 && !g_sleeping) fetch_pihole();
-            last_refresh = now_t;
-            need_draw = 1;
+
+        /* --- page-aware auto-refresh (timer resets AFTER fetch so a slow
+         *     fetch does not immediately re-trigger another one)         --- */
+        if (!g_sleeping) {
+            if (g_page <= 1) {
+                if (now_t - last_sys_refresh >= REFRESH_SECS) {
+                    if (g_page == 0) fetch_system();
+                    else             fetch_network();
+                    last_sys_refresh = time(NULL);
+                    need_draw = 1;
+                }
+            } else {
+                if (now_t - last_ph_refresh >= REFRESH_SECS) {
+                    fetch_pihole();
+                    last_ph_refresh = time(NULL);
+                    need_draw = 1;
+                }
+            }
         }
 
         /* --- dim / sleep timeout --- */
@@ -780,7 +818,7 @@ int main(void)
                 need_draw  = 0;
             } else if (!g_dimmed && idle >= DIM_SECS) {
                 g_dimmed = 1;
-                LCD_SetBacklight((UWORD)BL_VALS[0]); /* dim to minimum */
+                LCD_SetBacklight((UWORD)BL_VALS[0]);
             }
         }
 
