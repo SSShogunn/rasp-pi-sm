@@ -205,8 +205,8 @@ def draw_settings():
         y += 6
 
     # control hints
-    d.text((4, y + 4),  "UP/DN : adjust", font=F_FOOT, fill=T_DIM)
-    d.text((4, y + 15), "L/R   : switch", font=F_FOOT, fill=T_DIM)
+    d.text((4, y + 4),  "UP/DN : switch", font=F_FOOT, fill=T_DIM)
+    d.text((4, y + 15), "L/R   : adjust", font=F_FOOT, fill=T_DIM)
 
     _footer(d)
     return img
@@ -252,16 +252,11 @@ def _wake_if_sleeping():
 
 # ── button callbacks ──────────────────────────────────────────────────────────
 def _up():
-    global page, bl_pct, sleep_idx
+    global page, settings_sel
     if _wake_if_sleeping(): return
     _touch()
     if settings_open:
-        if settings_sel == 0:
-            bl_pct = min(100, bl_pct + 10)
-            with _lock:
-                lcd.bl_DutyCycle(bl_pct)
-        else:
-            sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
+        settings_sel = (settings_sel - 1) % 2
     else:
         page = (page - 1) % PAGES
         if page == 0: fetch_system()
@@ -269,7 +264,19 @@ def _up():
     render()
 
 def _down():
-    global page, bl_pct, sleep_idx
+    global page, settings_sel
+    if _wake_if_sleeping(): return
+    _touch()
+    if settings_open:
+        settings_sel = (settings_sel + 1) % 2
+    else:
+        page = (page + 1) % PAGES
+        if page == 0: fetch_system()
+        else:         fetch_network()
+    render()
+
+def _left():
+    global bl_pct, sleep_idx
     if _wake_if_sleeping(): return
     _touch()
     if settings_open:
@@ -279,26 +286,19 @@ def _down():
                 lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = max(0, sleep_idx - 1)
-    else:
-        page = (page + 1) % PAGES
-        if page == 0: fetch_system()
-        else:         fetch_network()
-    render()
-
-def _left():
-    global settings_sel
-    if _wake_if_sleeping(): return
-    _touch()
-    if settings_open:
-        settings_sel = (settings_sel - 1) % 2
         render()
 
 def _right():
-    global settings_sel
+    global bl_pct, sleep_idx
     if _wake_if_sleeping(): return
     _touch()
     if settings_open:
-        settings_sel = (settings_sel + 1) % 2
+        if settings_sel == 0:
+            bl_pct = min(100, bl_pct + 10)
+            with _lock:
+                lcd.bl_DutyCycle(bl_pct)
+        else:
+            sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
         render()
 
 def _toggle_settings():
