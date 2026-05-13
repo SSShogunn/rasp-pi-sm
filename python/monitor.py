@@ -9,9 +9,29 @@ Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
 
-import time, signal, threading, subprocess
+import time, signal, threading, subprocess, os, json
 from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
+
+# ── settings persistence ───────────────────────────────────────────────────────
+_SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+
+def _load_settings():
+    global bl_pct, sleep_idx
+    try:
+        with open(_SETTINGS_FILE) as f:
+            s = json.load(f)
+        bl_pct    = max(10, min(100, int(s.get("bl_pct",   60))))
+        sleep_idx = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
+    except Exception:
+        pass
+
+def _save_settings():
+    try:
+        with open(_SETTINGS_FILE, "w") as f:
+            json.dump({"bl_pct": bl_pct, "sleep_idx": sleep_idx}, f)
+    except Exception:
+        pass
 
 # ── config ────────────────────────────────────────────────────────────────────
 PAGES         = 2
@@ -225,6 +245,8 @@ settings_open = False
 settings_sel  = 0           # 0 = brightness, 1 = sleep time
 sleep_idx     = 0           # index into SLEEP_PRESETS
 
+_load_settings()
+
 def render():
     if settings_open:
         img = draw_settings()
@@ -286,6 +308,7 @@ def _left():
                 lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = max(0, sleep_idx - 1)
+        _save_settings()
         render()
 
 def _right():
@@ -299,6 +322,7 @@ def _right():
                 lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
+        _save_settings()
         render()
 
 def _toggle_settings():
