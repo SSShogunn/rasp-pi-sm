@@ -27,24 +27,25 @@ class RaspberryPi:
         self.GPIO_BL_PIN  = self.gpio_pwm(bl)
         self.bl_DutyCycle(0)
 
-        self.GPIO_KEY_UP_PIN    = self.gpio_mode(KEY_UP_PIN,    self.INPUT, True, None)
-        self.GPIO_KEY_DOWN_PIN  = self.gpio_mode(KEY_DOWN_PIN,  self.INPUT, True, None)
-        self.GPIO_KEY_LEFT_PIN  = self.gpio_mode(KEY_LEFT_PIN,  self.INPUT, True, None)
-        self.GPIO_KEY_RIGHT_PIN = self.gpio_mode(KEY_RIGHT_PIN, self.INPUT, True, None)
-        self.GPIO_KEY_PRESS_PIN = self.gpio_mode(KEY_PRESS_PIN, self.INPUT, True, None)
-        self.GPIO_KEY1_PIN      = self.gpio_mode(KEY1_PIN,      self.INPUT, True, None)
-        self.GPIO_KEY2_PIN      = self.gpio_mode(KEY2_PIN,      self.INPUT, True, None)
-        self.GPIO_KEY3_PIN      = self.gpio_mode(KEY3_PIN,      self.INPUT, True, None)
+        self.GPIO_KEY_UP_PIN    = self.gpio_mode(KEY_UP_PIN,    self.INPUT, True, None, 0.1)
+        self.GPIO_KEY_DOWN_PIN  = self.gpio_mode(KEY_DOWN_PIN,  self.INPUT, True, None, 0.1)
+        self.GPIO_KEY_LEFT_PIN  = self.gpio_mode(KEY_LEFT_PIN,  self.INPUT, True, None, 0.1)
+        self.GPIO_KEY_RIGHT_PIN = self.gpio_mode(KEY_RIGHT_PIN, self.INPUT, True, None, 0.1)
+        self.GPIO_KEY_PRESS_PIN = self.gpio_mode(KEY_PRESS_PIN, self.INPUT, True, None, 0.1)
+        self.GPIO_KEY1_PIN      = self.gpio_mode(KEY1_PIN,      self.INPUT, True, None, 0.1)
+        self.GPIO_KEY2_PIN      = self.gpio_mode(KEY2_PIN,      self.INPUT, True, None, 0.1)
+        self.GPIO_KEY3_PIN      = self.gpio_mode(KEY3_PIN,      self.INPUT, True, None, 0.1)
 
         self.SPI = spi
         if self.SPI is not None:
             self.SPI.max_speed_hz = spi_freq
             self.SPI.mode = 0b00
 
-    def gpio_mode(self, Pin, Mode, pull_up=None, active_state=True):
+    def gpio_mode(self, Pin, Mode, pull_up=None, active_state=True, bounce_time=None):
         if Mode:
             return DigitalOutputDevice(Pin, active_high=True, initial_value=False)
-        return DigitalInputDevice(Pin, pull_up=pull_up, active_state=active_state)
+        return DigitalInputDevice(Pin, pull_up=pull_up, active_state=active_state,
+                                  bounce_time=bounce_time)
 
     def digital_write(self, Pin, value):
         Pin.on() if value else Pin.off()

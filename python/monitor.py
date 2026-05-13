@@ -17,7 +17,6 @@ import threading
 import subprocess
 
 from PIL import Image, ImageDraw, ImageFont
-from gpiozero import Button
 import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
@@ -142,11 +141,10 @@ def render():
     with _lock:
         lcd.LCD_ShowImage(img)
 
-# ── buttons  (gpiozero handles pull-up + bounce internally) ──────────────────
-btn_up   = Button(6,  pull_up=True, bounce_time=0.12)
-btn_down = Button(19, pull_up=True, bounce_time=0.12)
-btn_key2 = Button(20, pull_up=True, bounce_time=0.12)
-btn_key3 = Button(16, pull_up=True, bounce_time=0.12)
+# ── buttons ───────────────────────────────────────────────────────────────────
+# config.py already claimed all key pins as DigitalInputDevice with pull_up=True
+# and bounce_time=0.1.  With active_state=None, gpiozero infers active=LOW, so
+# when_activated fires on press (pin pulled to ground).
 
 def _navigate(direction):
     global page
@@ -166,10 +164,10 @@ def _brightness():
     with _lock:
         lcd.bl_DutyCycle(BL_LEVELS[bl_idx])
 
-btn_up.when_pressed   = lambda: _navigate(-1)
-btn_down.when_pressed = lambda: _navigate(+1)
-btn_key2.when_pressed = _refresh
-btn_key3.when_pressed = _brightness
+lcd.GPIO_KEY_UP_PIN.when_activated   = lambda: _navigate(-1)
+lcd.GPIO_KEY_DOWN_PIN.when_activated = lambda: _navigate(+1)
+lcd.GPIO_KEY2_PIN.when_activated     = _refresh
+lcd.GPIO_KEY3_PIN.when_activated     = _brightness
 
 # ── main loop ─────────────────────────────────────────────────────────────────
 running = True
