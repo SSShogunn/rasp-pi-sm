@@ -2,3 +2,4 @@ bin/
 system_monitor
 main
 sample-files/
+python/settings.json
