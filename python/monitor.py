@@ -2,7 +2,9 @@
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
 Pages: 1=System  2=Network
-Keys:  Up/Down = navigate  KEY2 = refresh  KEY3 = brightness  any = wake
+Keys:  Up/Down   = navigate pages (normal) / adjust value (settings)
+       Left/Right = switch setting item (settings only)
+       KEY2 = settings menu  KEY3 = refresh  any = wake
 Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
@@ -12,29 +14,31 @@ from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES      = 2
-REFRESH    = 5          # seconds between auto-refresh
-SLEEP_SECS = 10         # seconds idle before backlight off
-BL_LEVELS  = [20, 60, 100]
-W = H      = 128
+PAGES         = 2
+REFRESH       = 5
+SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]   # seconds; 0 = never
+SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
+W = H         = 128
 
 # ── palette ───────────────────────────────────────────────────────────────────
-BG       = ( 10,  10,  20)   # near-black navy canvas
-HDR_SYS  = (  0,  35,  55)   # dark teal header
-HDR_NET  = (  0,  45,  22)   # dark green header
-ACC_SYS  = (  0, 195, 255)   # electric cyan accent
-ACC_NET  = (  0, 215, 105)   # electric green accent
-TRACK    = ( 28,  30,  45)   # bar background track
+BG       = ( 10,  10,  20)
+HDR_SYS  = (  0,  35,  55)
+HDR_NET  = (  0,  45,  22)
+HDR_SET  = ( 25,  10,  40)
+ACC_SYS  = (  0, 195, 255)
+ACC_NET  = (  0, 215, 105)
+ACC_SET  = (180,  80, 255)
+TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
 C_RAM    = (145,  85, 255)
 C_DISK   = (255, 170,   0)
 C_OK     = (  0, 215, 105)
 C_WARN   = (255, 190,   0)
 C_HOT    = (255,  60,  60)
-T_PRI    = (220, 225, 238)   # primary text
-T_SEC    = (100, 110, 132)   # secondary label
-T_DIM    = ( 55,  62,  80)   # very dim (footer, minor labels)
-SEP_C    = ( 32,  36,  52)   # separator line
+T_PRI    = (220, 225, 238)
+T_SEC    = (100, 110, 132)
+T_DIM    = ( 55,  62,  80)
+SEP_C    = ( 32,  36,  52)
 C_WIFI   = (255, 205,  55)
 C_USB    = (  0, 215, 215)
 C_TS     = ( 90, 162, 255)
@@ -96,7 +100,6 @@ def _bar(d, x, y, w, h, pct, color):
         d.rectangle([x + 1, y + 1, x + fw, y + h - 2], fill=color)
 
 def _bar_row(d, y, label, val_str, pct, bar_color):
-    """Label left + value right-aligned on same line, then thin bar below."""
     d.text((4, y), label, font=F_LABEL, fill=T_SEC)
     vx = W - _tw(d, val_str, F_VAL) - 4
     d.text((vx, y), val_str, font=F_VAL, fill=T_PRI)
@@ -104,15 +107,14 @@ def _bar_row(d, y, label, val_str, pct, bar_color):
 
 def _header(d, title, accent, hdr_bg):
     d.rectangle([0, 0, W - 1, 15], fill=hdr_bg)
-    d.rectangle([0, 0, 3, 15], fill=accent)          # left accent stripe
+    d.rectangle([0, 0, 3, 15], fill=accent)
     d.text((8, 3), title, font=F_HDR, fill=T_PRI)
     pg = f"{page + 1}/{PAGES}"
     d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
 
 def _footer(d):
     _sep(d, 112)
-    now = time.strftime("%H:%M")
-    d.text((4, 115), now, font=F_FOOT, fill=T_DIM)
+    d.text((4, 115), time.strftime("%H:%M"), font=F_FOOT, fill=T_DIM)
 
 # ── page 1 – system ───────────────────────────────────────────────────────────
 def draw_system():
@@ -164,6 +166,51 @@ def draw_network():
     _footer(d)
     return img
 
+# ── settings page ─────────────────────────────────────────────────────────────
+def draw_settings():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+
+    # header
+    d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15], fill=ACC_SET)
+    d.text((8, 3), "SETTINGS", font=F_HDR, fill=T_PRI)
+    hint = "KEY2=exit"
+    d.text((W - _tw(d, hint, F_FOOT) - 4, 4), hint, font=F_FOOT, fill=T_DIM)
+
+    n = len(SLEEP_PRESETS) - 1
+    sleep_bar_pct = int(sleep_idx * 100 // n) if n else 100
+
+    items = [
+        ("BRIGHTNESS", f"{bl_pct}%",             bl_pct),
+        ("SLEEP TIME",  SLEEP_LABELS[sleep_idx],  sleep_bar_pct),
+    ]
+
+    y = 20
+    for i, (label, val_str, bar_pct) in enumerate(items):
+        sel     = (settings_sel == i)
+        lbl_col = ACC_SET if sel else T_SEC
+        val_col = T_PRI   if sel else T_DIM
+        bar_col = ACC_SET if sel else TRACK
+
+        if sel:
+            d.rectangle([0, y - 2, 3, y + 22], fill=ACC_SET)
+
+        d.text((6, y), label, font=F_LABEL, fill=lbl_col)
+        d.text((W - _tw(d, val_str, F_VAL) - 4, y), val_str, font=F_VAL, fill=val_col)
+        _bar(d, 6, y + 13, W - 12, 4, bar_pct, bar_col)
+
+        y += 30
+        _sep(d, y)
+        y += 6
+
+    # control hints
+    d.text((4, y + 4),  "UP/DN : adjust", font=F_FOOT, fill=T_DIM)
+    d.text((4, y + 15), "L/R   : switch", font=F_FOOT, fill=T_DIM)
+
+    _footer(d)
+    return img
+
 # ── LCD + state ───────────────────────────────────────────────────────────────
 lcd           = LCD_1in44.LCD()
 lcd.LCD_Init(LCD_1in44.SCAN_DIR_DFT)
@@ -171,12 +218,20 @@ lcd.LCD_Clear()
 
 _lock         = threading.Lock()
 page          = 0
-bl_idx        = 1
+bl_pct        = 60          # brightness 10–100
 sleeping      = False
 last_activity = time.time()
+settings_open = False
+settings_sel  = 0           # 0 = brightness, 1 = sleep time
+sleep_idx     = 0           # index into SLEEP_PRESETS
 
 def render():
-    img = draw_system() if page == 0 else draw_network()
+    if settings_open:
+        img = draw_settings()
+    elif page == 0:
+        img = draw_system()
+    else:
+        img = draw_network()
     with _lock:
         lcd.LCD_ShowImage(img)
 
@@ -185,46 +240,89 @@ def _touch():
     last_activity = time.time()
 
 def _wake_if_sleeping():
-    """Returns True if display was asleep (caller should skip its action)."""
     global sleeping
     _touch()
     if sleeping:
         sleeping = False
         with _lock:
-            lcd.bl_DutyCycle(BL_LEVELS[bl_idx])
+            lcd.bl_DutyCycle(bl_pct)
         render()
         return True
     return False
 
 # ── button callbacks ──────────────────────────────────────────────────────────
-def _navigate(direction):
-    global page
+def _up():
+    global page, bl_pct, sleep_idx
     if _wake_if_sleeping(): return
     _touch()
-    page = (page + direction) % PAGES
-    if page == 0: fetch_system()
-    else:         fetch_network()
+    if settings_open:
+        if settings_sel == 0:
+            bl_pct = min(100, bl_pct + 10)
+            with _lock:
+                lcd.bl_DutyCycle(bl_pct)
+        else:
+            sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
+    else:
+        page = (page - 1) % PAGES
+        if page == 0: fetch_system()
+        else:         fetch_network()
+    render()
+
+def _down():
+    global page, bl_pct, sleep_idx
+    if _wake_if_sleeping(): return
+    _touch()
+    if settings_open:
+        if settings_sel == 0:
+            bl_pct = max(10, bl_pct - 10)
+            with _lock:
+                lcd.bl_DutyCycle(bl_pct)
+        else:
+            sleep_idx = max(0, sleep_idx - 1)
+    else:
+        page = (page + 1) % PAGES
+        if page == 0: fetch_system()
+        else:         fetch_network()
+    render()
+
+def _left():
+    global settings_sel
+    if _wake_if_sleeping(): return
+    _touch()
+    if settings_open:
+        settings_sel = (settings_sel - 1) % 2
+        render()
+
+def _right():
+    global settings_sel
+    if _wake_if_sleeping(): return
+    _touch()
+    if settings_open:
+        settings_sel = (settings_sel + 1) % 2
+        render()
+
+def _toggle_settings():
+    global settings_open
+    if _wake_if_sleeping(): return
+    _touch()
+    settings_open = not settings_open
     render()
 
 def _refresh():
     if _wake_if_sleeping(): return
     _touch()
+    if settings_open:
+        return
     if page == 0: fetch_system()
     else:         fetch_network()
     render()
 
-def _brightness():
-    global bl_idx
-    if _wake_if_sleeping(): return
-    _touch()
-    bl_idx = (bl_idx + 1) % len(BL_LEVELS)
-    with _lock:
-        lcd.bl_DutyCycle(BL_LEVELS[bl_idx])
-
-lcd.GPIO_KEY_UP_PIN.when_activated   = lambda: _navigate(-1)
-lcd.GPIO_KEY_DOWN_PIN.when_activated = lambda: _navigate(+1)
-lcd.GPIO_KEY2_PIN.when_activated     = _refresh
-lcd.GPIO_KEY3_PIN.when_activated     = _brightness
+lcd.GPIO_KEY_UP_PIN.when_activated    = _up
+lcd.GPIO_KEY_DOWN_PIN.when_activated  = _down
+lcd.GPIO_KEY_LEFT_PIN.when_activated  = _left
+lcd.GPIO_KEY_RIGHT_PIN.when_activated = _right
+lcd.GPIO_KEY2_PIN.when_activated      = _toggle_settings
+lcd.GPIO_KEY3_PIN.when_activated      = _refresh
 
 # ── signal + main loop ────────────────────────────────────────────────────────
 running = True
@@ -240,7 +338,7 @@ print("Fetching initial data...")
 fetch_system()
 fetch_network()
 with _lock:
-    lcd.bl_DutyCycle(BL_LEVELS[bl_idx])
+    lcd.bl_DutyCycle(bl_pct)
 render()
 print("Running – Ctrl-C to quit")
 
@@ -250,7 +348,7 @@ try:
     while running:
         now = time.time()
 
-        if not sleeping:
+        if not sleeping and not settings_open:
             if page == 0 and now - last_sys >= REFRESH:
                 fetch_system()
                 last_sys = time.time()
@@ -260,10 +358,11 @@ try:
                 last_net = time.time()
                 render()
 
-            if (now - last_activity) >= SLEEP_SECS:
-                sleeping = True
-                with _lock:
-                    lcd.bl_DutyCycle(0)
+        sleep_secs = SLEEP_PRESETS[sleep_idx]
+        if not sleeping and sleep_secs > 0 and (now - last_activity) >= sleep_secs:
+            sleeping = True
+            with _lock:
+                lcd.bl_DutyCycle(0)
 
         time.sleep(0.1)
 finally:
