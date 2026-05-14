@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
-Pages: System · Network · Services · Clock · Games
-Keys:  Up/Down    = navigate pages / settings / game menu / power select
-       Left/Right = adjust settings / cancel power
-       KEY1 = power  KEY2 = settings  KEY3 = refresh  PRESS = confirm power / launch game
+Pages: System · Network · Services · Pi-hole · Games · Settings
+Keys:  Up/Down    = navigate settings hub / game menu / power select
+       Left/Right = page navigate / adjust value inside settings app
+       KEY1 = power  KEY2 = settings (jump/back)  KEY3 = refresh  PRESS = confirm / open / toggle
 Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
 
-import time, signal, threading, subprocess, os, json, random
+import time, signal, threading, subprocess, os, json, random, urllib.request, urllib.error
 from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES         = 4
+PAGES         = 6
 PAGE_SYS      = 0
 PAGE_NET      = 1
 PAGE_SVC      = 2
-PAGE_GAMES    = 3
+PAGE_PHO      = 3
+PAGE_GAMES    = 4
+PAGE_SET      = 5
 
 REFRESH       = 5
 REFRESH_SVC   = 30
+REFRESH_PHO   = 10
+PHO_HOST      = "http://localhost"
 SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]
 SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
 SERVICES      = [("pihole-FTL", "pihole-FTL"),
@@ -38,12 +42,14 @@ HDR_SVC  = ( 35,  18,   0)
 HDR_SET  = ( 25,  10,  40)
 HDR_PWR  = ( 45,   5,   5)
 HDR_GAME = ( 25,  20,   0)
+HDR_PHO  = ( 35,   5,  12)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
 ACC_SVC  = (255, 140,   0)
 ACC_SET  = (180,  80, 255)
 ACC_PWR  = (255,  60,  60)
 ACC_GAME = (255, 220,   0)
+ACC_PHO  = (255,  75, 110)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
 C_RAM    = (145,  85, 255)
@@ -74,6 +80,7 @@ F_LABEL  = _font("DejaVuSans.ttf",       8)
 F_VAL    = _font("DejaVuSans-Bold.ttf",  9)
 F_IP     = _font("DejaVuSans.ttf",       9)
 F_FOOT   = _font("DejaVuSans.ttf",       8)
+F_MED    = _font("DejaVuSans-Bold.ttf", 14)
 
 # ── data ──────────────────────────────────────────────────────────────────────
 data = dict(
@@ -84,11 +91,31 @@ data = dict(
     rssi="--", rx_speed="--", tx_speed="--",
     rx_total="--", tx_total="--",
     last_login="...", updates="--",
+    pho_total="--", pho_blocked="--", pho_pct="--",
+    pho_gravity="--", pho_clients="--", pho_cached="--",
+    pho_status="?", pho_last="--",
 )
 cpu_cores    = [0, 0, 0, 0]
 svc_statuses = {label: False for label, _ in SERVICES}
 _prev_net    = {"rx": 0, "tx": 0, "t": 0.0}
 _cpu_snap    = None   # previous /proc/stat snapshot for delta CPU calculation
+
+_SET_APPS = ["Brightness", "Sleep", "WiFi", "Bluetooth"]
+_SET_COLS = [ACC_SET, (55, 100, 220), C_OK, (0, 185, 230)]
+
+_pho_sid   = None
+_pho_sid_t = 0.0
+
+def _get_rfkill(kind):
+    try:
+        for entry in sorted(os.listdir("/sys/class/rfkill")):
+            with open(f"/sys/class/rfkill/{entry}/type") as f:
+                if f.read().strip() == kind:
+                    with open(f"/sys/class/rfkill/{entry}/soft") as f2:
+                        return f2.read().strip() == "0"  # "0" = unblocked = ON
+    except Exception:
+        pass
+    return True
 
 def _run(cmd):
     try:
@@ -97,6 +124,40 @@ def _run(cmd):
         ).decode().strip()
     except Exception:
         return ""
+
+def _pho_auth():
+    global _pho_sid, _pho_sid_t
+    try:
+        body = json.dumps({"password": pho_password}).encode()
+        req  = urllib.request.Request(
+            f"{PHO_HOST}/api/auth", data=body,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            j = json.loads(r.read())
+        sid = j.get("session", {}).get("sid")
+        if sid:
+            _pho_sid = sid; _pho_sid_t = time.time(); return True
+    except Exception:
+        pass
+    _pho_sid = None; return False
+
+def _pho_ensure_auth():
+    if not pho_password:
+        return True
+    if not _pho_sid or (time.time() - _pho_sid_t) > 1500:
+        return _pho_auth()
+    return True
+
+def _pho_get(path):
+    headers = {"Cookie": f"sid={_pho_sid}"} if _pho_sid else {}
+    req = urllib.request.Request(f"{PHO_HOST}{path}", headers=headers)
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return json.loads(r.read())
+
+def _fmt_gravity(n):
+    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
+    if n >= 1_000:     return f"{n//1000}K"
+    return str(n)
 
 # ── fetch (all /proc+/sys reads — no subprocess where avoidable) ──────────────
 def _cpu_stat():
@@ -249,23 +310,53 @@ def fetch_services():
     except Exception:
         data["updates"] = "--"
 
+def fetch_pihole():
+    if not _pho_ensure_auth():
+        data["pho_status"] = "auth err"; return
+    try:
+        s = _pho_get("/api/stats/summary")
+        q = s.get("queries", {})
+        g = s.get("gravity", {})
+        c = s.get("clients", {})
+        data["pho_total"]   = f"{q.get('total',   0):,}"
+        data["pho_blocked"] = f"{q.get('blocked', 0):,}"
+        data["pho_pct"]     = f"{q.get('percent_blocked', 0.0):.1f}"
+        data["pho_cached"]  = f"{q.get('cached',  0):,}"
+        data["pho_clients"] = str(c.get("active", "--"))
+        data["pho_gravity"] = _fmt_gravity(g.get("domains_being_blocked", 0))
+    except Exception:
+        data["pho_status"] = "error"; return
+    try:
+        b = _pho_get("/api/dns/blocking")
+        data["pho_status"] = b.get("blocking", "?")
+    except Exception:
+        data["pho_status"] = "?"
+    try:
+        r = _pho_get("/api/stats/recent_blocked?count=1")
+        doms = r.get("domains", [])
+        data["pho_last"] = doms[0] if doms else "--"
+    except Exception:
+        data["pho_last"] = "--"
+
 # ── settings persistence ───────────────────────────────────────────────────────
 _SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
 def _load_settings():
-    global bl_pct, sleep_idx
+    global bl_pct, sleep_idx, pho_password
     try:
         with open(_SETTINGS_FILE) as f:
             s = json.load(f)
-        bl_pct    = max(10, min(100, int(s.get("bl_pct",   60))))
-        sleep_idx = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
+        bl_pct       = max(10, min(100, int(s.get("bl_pct",   60))))
+        sleep_idx    = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
+        pho_password = s.get("pho_password", "")
     except Exception:
         pass
 
 def _save_settings():
     try:
         with open(_SETTINGS_FILE, "w") as f:
-            json.dump({"bl_pct": bl_pct, "sleep_idx": sleep_idx}, f)
+            json.dump({"bl_pct": bl_pct, "sleep_idx": sleep_idx,
+                       "pho_password": pho_password}, f)
     except Exception:
         pass
 
@@ -422,7 +513,55 @@ def draw_services():
     _footer(d)
     return img
 
-# ── page 4 – games hub ───────────────────────────────────────────────────────
+# ── page 4 – pi-hole ─────────────────────────────────────────────────────────
+def draw_pihole():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+
+    status = data["pho_status"]
+    if status == "enabled":   acc = C_OK
+    elif status == "disabled": acc = C_HOT
+    else:                      acc = T_DIM
+    _header(d, "PI-HOLE", acc, HDR_PHO)
+
+    # Blocked count + percent
+    pct_s = f"{data['pho_pct']}%"
+    d.text((4,  18), "BLOCKED", font=F_LABEL, fill=T_SEC)
+    d.text((54, 18), data["pho_blocked"], font=F_VAL,   fill=C_HOT)
+    d.text((W - _tw(d, pct_s, F_VAL) - 4, 18), pct_s,  font=F_VAL, fill=C_WARN)
+
+    # Total queries
+    d.text((4,  30), "QUERIES", font=F_LABEL, fill=T_SEC)
+    d.text((54, 30), data["pho_total"],   font=F_VAL, fill=T_PRI)
+
+    # Cached
+    d.text((4,  42), "CACHED",  font=F_LABEL, fill=T_SEC)
+    d.text((54, 42), data["pho_cached"],  font=F_VAL, fill=C_CPU)
+
+    # Clients + gravity on one row
+    cl_s = f"CLNTS {data['pho_clients']}"
+    gv_s = f"GRV {data['pho_gravity']}"
+    d.text((4,  54), cl_s, font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, gv_s, F_LABEL) - 4, 54), gv_s, font=F_LABEL, fill=T_DIM)
+
+    _sep(d, 66)
+
+    # Last blocked domain (auto-truncate to fit)
+    d.text((4, 69), "LAST BLOCK", font=F_LABEL, fill=T_SEC)
+    last = data["pho_last"]
+    while last and _tw(d, last + ("…" if len(last) < len(data["pho_last"]) else ""), F_LABEL) > W - 8:
+        last = last[:-1]
+    if len(last) < len(data["pho_last"]): last += "…"
+    d.text((4, 79), last, font=F_LABEL, fill=ACC_PHO)
+
+    _sep(d, 92)
+    hint = "PRESS:toggle  K3:refresh"
+    d.text((4, 95), hint, font=F_FOOT, fill=T_DIM)
+
+    _footer(d)
+    return img
+
+# ── page 5 – games hub ───────────────────────────────────────────────────────
 def draw_games():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
@@ -447,37 +586,123 @@ def draw_games():
     d.text((4, 113), "L/R  : exit",               font=F_FOOT, fill=T_DIM)
     return img
 
-# ── settings page ─────────────────────────────────────────────────────────────
-def draw_settings():
+# ── page 5 – settings hub + sub-screens ──────────────────────────────────────
+def draw_set_hub():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
-    d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
-    d.rectangle([0, 0, 3, 15], fill=ACC_SET)
-    d.text((8, 3), "SETTINGS", font=F_HDR, fill=T_PRI)
-    d.text((W - _tw(d, "KEY2=exit", F_FOOT) - 4, 4), "KEY2=exit", font=F_FOOT, fill=T_DIM)
+    _header(d, "SETTINGS", ACC_SET, HDR_SET)
 
-    n = len(SLEEP_PRESETS) - 1
-    items = [
-        ("BRIGHTNESS", f"{bl_pct}%",            bl_pct),
-        ("SLEEP TIME",  SLEEP_LABELS[sleep_idx], sleep_idx * 100 // n if n else 100),
-    ]
-    y = 20
-    for i, (label, val_str, bar_pct) in enumerate(items):
-        sel     = (settings_sel == i)
-        lbl_col = ACC_SET if sel else T_SEC
-        val_col = T_PRI   if sel else T_DIM
-        bar_col = ACC_SET if sel else TRACK
+    vals = [f"{bl_pct}%", SLEEP_LABELS[sleep_idx],
+            "ON" if wifi_on else "OFF", "ON" if bt_on else "OFF"]
+    y = 18
+    for i, (name, col, val) in enumerate(zip(_SET_APPS, _SET_COLS, vals)):
+        sel = (set_sel == i)
         if sel:
-            d.rectangle([0, y - 2, 3, y + 22], fill=ACC_SET)
-        d.text((6, y), label, font=F_LABEL, fill=lbl_col)
-        d.text((W - _tw(d, val_str, F_VAL) - 4, y), val_str, font=F_VAL, fill=val_col)
-        _bar(d, 6, y + 13, W - 12, 4, bar_pct, bar_col)
-        y += 30; _sep(d, y); y += 6
+            d.rectangle([0, y, W-1, y+22],
+                        fill=(col[0]//5, col[1]//5, col[2]//5))
+            d.rectangle([0, y, 3, y+22], fill=col)
+        d.rectangle([6, y+6, 16, y+16], fill=col if sel else T_DIM)
+        d.text((20, y+6), name, font=F_LABEL, fill=T_PRI if sel else T_SEC)
+        d.text((W - _tw(d, val, F_VAL) - 4, y+6), val,
+               font=F_VAL, fill=T_PRI if sel else T_DIM)
+        y += 23
 
-    d.text((4, y + 4),  "UP/DN : switch", font=F_FOOT, fill=T_DIM)
-    d.text((4, y + 15), "L/R   : adjust", font=F_FOOT, fill=T_DIM)
+    _sep(d, 112)
+    d.text((4, 115), "PRESS:open  KEY2:exit", font=F_FOOT, fill=T_DIM)
+    return img
+
+def draw_set_bright():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W-1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15],   fill=ACC_SET)
+    d.text((8, 3), "BRIGHTNESS", font=F_HDR, fill=T_PRI)
+
+    val = f"{bl_pct}%"
+    d.text(((W - _tw(d, val, F_MED)) // 2, 33), val, font=F_MED, fill=ACC_SET)
+    _bar(d, 14, 57, W-28, 7, bl_pct, ACC_SET)
+
+    _sep(d, 74)
+    d.text((4,  77), "L / R : adjust", font=F_FOOT, fill=T_DIM)
+    d.text((4,  89), "KEY2  : back",   font=F_FOOT, fill=T_DIM)
     _footer(d)
     return img
+
+def draw_set_sleep():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    SL_COL = (55, 100, 220)
+    d.rectangle([0, 0, W-1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15],   fill=SL_COL)
+    d.text((8, 3), "SLEEP TIMER", font=F_HDR, fill=T_PRI)
+
+    val = SLEEP_LABELS[sleep_idx]
+    d.text(((W - _tw(d, val, F_MED)) // 2, 33), val, font=F_MED, fill=SL_COL)
+
+    cols = 4; sw = (W - 8) // cols
+    for j, lbl in enumerate(SLEEP_LABELS):
+        gx = 4 + (j % cols) * sw
+        gy = 60 + (j // cols) * 14
+        sel = (j == sleep_idx)
+        d.rectangle([gx, gy, gx+sw-3, gy+11],
+                    fill=(25, 40, 80) if sel else BG,
+                    outline=SL_COL if sel else T_DIM)
+        d.text((gx + (sw-3 - _tw(d, lbl, F_FOOT)) // 2, gy+1),
+               lbl, font=F_FOOT, fill=T_PRI if sel else T_DIM)
+
+    _sep(d, 102)
+    d.text((4, 105), "L/R: change  KEY2: back", font=F_FOOT, fill=T_DIM)
+    return img
+
+def draw_set_wifi():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W-1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15],   fill=C_OK)
+    d.text((8, 3), "WiFi", font=F_HDR, fill=T_PRI)
+
+    dot_col = C_OK if wifi_on else C_HOT
+    status  = "ON" if wifi_on else "OFF"
+    d.ellipse([14, 26, 28, 40], fill=dot_col)
+    d.text((35, 25), status, font=F_MED, fill=dot_col)
+
+    y = 50
+    if wifi_on:
+        d.text((4, y), data["wip"], font=F_IP, fill=C_WIFI); y += 13
+        if data["rssi"] != "--":
+            d.text((4, y), f"Signal: {data['rssi']}dBm", font=F_LABEL, fill=T_SEC)
+
+    _sep(d, 88)
+    d.text((4,  91), "PRESS : toggle", font=F_FOOT, fill=T_PRI)
+    d.text((4, 103), "KEY2  : back",   font=F_FOOT, fill=T_DIM)
+    _footer(d)
+    return img
+
+def draw_set_bt():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    BT_COL = (0, 185, 230)
+    d.rectangle([0, 0, W-1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15],   fill=BT_COL)
+    d.text((8, 3), "Bluetooth", font=F_HDR, fill=T_PRI)
+
+    dot_col = BT_COL if bt_on else C_HOT
+    status  = "ON" if bt_on else "OFF"
+    d.ellipse([14, 26, 28, 40], fill=dot_col)
+    d.text((35, 25), status, font=F_MED, fill=dot_col)
+
+    _sep(d, 88)
+    d.text((4,  91), "PRESS : toggle", font=F_FOOT, fill=T_PRI)
+    d.text((4, 103), "KEY2  : back",   font=F_FOOT, fill=T_DIM)
+    _footer(d)
+    return img
+
+def draw_settings_page():
+    if   set_app == 0: return draw_set_bright()
+    elif set_app == 1: return draw_set_sleep()
+    elif set_app == 2: return draw_set_wifi()
+    elif set_app == 3: return draw_set_bt()
+    else:              return draw_set_hub()
 
 # ── power page ────────────────────────────────────────────────────────────────
 def draw_power():
@@ -518,8 +743,11 @@ page          = 0
 bl_pct        = 60
 sleeping      = False
 last_activity = time.time()
-settings_open = False
-settings_sel  = 0
+set_sel       = 0      # selected row in settings hub
+set_app       = None   # None=hub, 0=Brightness, 1=Sleep, 2=WiFi, 3=BT
+wifi_on       = _get_rfkill("wlan")
+bt_on         = _get_rfkill("bluetooth")
+pho_password  = ""     # loaded from settings.json
 sleep_idx     = 0
 power_open    = False
 power_sel     = 0   # 0=Reboot  1=Power Off
@@ -530,11 +758,12 @@ _load_settings()
 
 def render():
     if power_open:              img = draw_power()
-    elif settings_open:         img = draw_settings()
     elif page == PAGE_SYS:      img = draw_system()
     elif page == PAGE_NET:      img = draw_network()
     elif page == PAGE_SVC:      img = draw_services()
+    elif page == PAGE_PHO:      img = draw_pihole()
     elif page == PAGE_GAMES:    img = draw_games()
+    elif page == PAGE_SET:      img = draw_settings_page()
     else:                       img = draw_system()
     with _lock:
         lcd.LCD_ShowImage(img)
@@ -559,9 +788,9 @@ running      = True
 _fetch_now   = threading.Event()   # set by KEY3 or page change to trigger immediate fetch
 
 def _bg_fetch():
-    last = [0.0, 0.0, 0.0]
-    ivs  = [REFRESH, REFRESH, REFRESH_SVC]
-    fns  = [fetch_system, fetch_network, fetch_services]
+    last = [0.0, 0.0, 0.0, 0.0]
+    ivs  = [REFRESH, REFRESH, REFRESH_SVC, REFRESH_PHO]
+    fns  = [fetch_system, fetch_network, fetch_services, fetch_pihole]
 
     while running:
         now = time.time()
@@ -573,7 +802,7 @@ def _bg_fetch():
                 if now - last[i] >= iv:
                     fn(); last[i] = time.time()
                     if i == cur: fetched = True
-            if fetched and not sleeping and not settings_open and not power_open:
+            if fetched and not sleeping and not power_open:
                 render()
 
         _fetch_now.wait(timeout=1.0)
@@ -581,33 +810,33 @@ def _bg_fetch():
             _fetch_now.clear()
             if not game_active:
                 p = page
-                if p < 3:
+                if p < len(fns):
                     fns[p](); last[p] = time.time()
-                if not sleeping and not settings_open and not power_open:
+                if not sleeping and not power_open:
                     render()
 
 # ── button callbacks ──────────────────────────────────────────────────────────
 def _up():
-    global settings_sel, power_sel, game_sel
+    global set_sel, power_sel, game_sel
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
-        power_sel = (power_sel - 1) % 2;        render()
-    elif settings_open:
-        settings_sel = (settings_sel - 1) % 2;  render()
+        power_sel = (power_sel - 1) % 2; render()
     elif page == PAGE_GAMES:
         game_sel = (game_sel - 1) % len(GAME_LIST); render()
+    elif page == PAGE_SET and set_app is None:
+        set_sel = (set_sel - 1) % len(_SET_APPS); render()
 
 def _down():
-    global settings_sel, power_sel, game_sel
+    global set_sel, power_sel, game_sel
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
-        power_sel = (power_sel + 1) % 2;        render()
-    elif settings_open:
-        settings_sel = (settings_sel + 1) % 2;  render()
+        power_sel = (power_sel + 1) % 2; render()
     elif page == PAGE_GAMES:
         game_sel = (game_sel + 1) % len(GAME_LIST); render()
+    elif page == PAGE_SET and set_app is None:
+        set_sel = (set_sel + 1) % len(_SET_APPS); render()
 
 def _left():
     global bl_pct, sleep_idx, power_open, page
@@ -615,13 +844,15 @@ def _left():
     _touch()
     if power_open:
         power_open = False; render(); return
-    if settings_open:
-        if settings_sel == 0:
+    if page == PAGE_SET and set_app is not None:
+        if set_app == 0:
             bl_pct = max(10, bl_pct - 10)
             with _lock: lcd.bl_DutyCycle(bl_pct)
-        else:
+            _save_settings()
+        elif set_app == 1:
             sleep_idx = max(0, sleep_idx - 1)
-        _save_settings(); render(); return
+            _save_settings()
+        render(); return
     page = (page - 1) % PAGES
     render()
 
@@ -631,24 +862,29 @@ def _right():
     _touch()
     if power_open:
         power_open = False; render(); return
-    if settings_open:
-        if settings_sel == 0:
+    if page == PAGE_SET and set_app is not None:
+        if set_app == 0:
             bl_pct = min(100, bl_pct + 10)
             with _lock: lcd.bl_DutyCycle(bl_pct)
-        else:
+            _save_settings()
+        elif set_app == 1:
             sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
-        _save_settings(); render(); return
+            _save_settings()
+        render(); return
     page = (page + 1) % PAGES
     render()
 
-def _toggle_settings():
-    global settings_open, power_open
+def _key2():
+    global set_app, page, power_open
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
         power_open = False; render(); return
-    settings_open = not settings_open
-    render()
+    if set_app is not None:
+        set_app = None; render(); return
+    if page == PAGE_SET:
+        page = PAGE_SYS; render(); return
+    page = PAGE_SET; render()
 
 def _refresh():
     global power_open
@@ -659,22 +895,49 @@ def _refresh():
     _fetch_now.set()
 
 def _toggle_power():
-    global power_open, power_sel, settings_open
+    global power_open, power_sel
     if _wake_if_sleeping(): return
     _touch()
     if game_active: return
-    settings_open = False
-    power_open    = not power_open
-    power_sel     = 0
+    power_open = not power_open
+    power_sel  = 0
     render()
 
+def _toggle_pihole():
+    new_on = (data["pho_status"] != "enabled")
+    try:
+        body = json.dumps({"blocking": new_on}).encode()
+        hdrs = {"Content-Type": "application/json"}
+        if _pho_sid: hdrs["Cookie"] = f"sid={_pho_sid}"
+        req = urllib.request.Request(
+            f"{PHO_HOST}/api/dns/blocking",
+            data=body, headers=hdrs, method="POST")
+        urllib.request.urlopen(req, timeout=5).close()
+        data["pho_status"] = "enabled" if new_on else "disabled"
+    except Exception:
+        pass
+    fetch_pihole(); render()
+
 def _press():
-    global game_active
+    global game_active, wifi_on, bt_on, set_app
     if _wake_if_sleeping(): return
     _touch()
     if game_active: return
-    if page == PAGE_GAMES:
+    if not power_open and page == PAGE_PHO:
+        threading.Thread(target=_toggle_pihole, daemon=True).start(); return
+    if not power_open and page == PAGE_GAMES:
         _launch_game(game_sel); return
+    if not power_open and page == PAGE_SET:
+        if set_app is None:
+            set_app = set_sel; render(); return
+        elif set_app == 2:
+            wifi_on = not wifi_on
+            subprocess.run(["rfkill", "unblock" if wifi_on else "block", "wlan"], check=False)
+            render(); return
+        elif set_app == 3:
+            bt_on = not bt_on
+            subprocess.run(["rfkill", "unblock" if bt_on else "block", "bluetooth"], check=False)
+            render(); return
     if not power_open:
         return
     msg = "REBOOTING..." if power_sel == 0 else "SHUTTING DOWN..."
@@ -857,7 +1120,7 @@ _BTN_HANDLERS = [
     (lcd.GPIO_KEY_RIGHT_PIN, _right),
     (lcd.GPIO_KEY_PRESS_PIN, _press),
     (lcd.GPIO_KEY1_PIN,      _toggle_power),
-    (lcd.GPIO_KEY2_PIN,      _toggle_settings),
+    (lcd.GPIO_KEY2_PIN,      _key2),
     (lcd.GPIO_KEY3_PIN,      _refresh),
 ]
 _DEBOUNCE = 0.15  # seconds between repeated fires for the same button
@@ -892,6 +1155,7 @@ print("Fetching initial data...")
 fetch_system()
 fetch_network()
 fetch_services()
+fetch_pihole()
 with _lock:
     lcd.bl_DutyCycle(bl_pct)
 render()
