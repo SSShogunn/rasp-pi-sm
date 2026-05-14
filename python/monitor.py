@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
-Pages: 1=System  2=Network  3=Services
-Keys:  Up/Down    = navigate pages / switch setting / select power option
-       Left/Right = adjust value (settings)  Left/Right = cancel (power)
-       KEY1 = power screen  KEY2 = settings  KEY3 = refresh  PRESS = confirm power
+Pages: System · Network · Services · Clock · Games
+Keys:  Up/Down    = navigate pages / settings / game menu / power select
+       Left/Right = adjust settings / cancel power
+       KEY1 = power  KEY2 = settings  KEY3 = refresh  PRESS = confirm power / launch game
 Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
 
-import time, signal, threading, subprocess, os, json
+import time, signal, threading, subprocess, os, json, random
 from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES         = 3
-REFRESH       = 5          # seconds between system/network refresh
-REFRESH_SVC   = 30         # seconds between services refresh (apt is slow)
+PAGES         = 5
+PAGE_SYS      = 0
+PAGE_NET      = 1
+PAGE_SVC      = 2
+PAGE_CLK      = 3
+PAGE_GAMES    = 4
+
+REFRESH       = 5
+REFRESH_SVC   = 30
 SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]
 SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
 SERVICES      = [("pihole-FTL", "pihole-FTL"),
                  ("Tailscale",  "tailscaled"),
                  ("SSH",        "ssh")]
+GAME_LIST     = ["SNAKE", "PONG", "FLAPPY BIRD"]
 W = H         = 128
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -31,11 +38,15 @@ HDR_NET  = (  0,  45,  22)
 HDR_SVC  = ( 35,  18,   0)
 HDR_SET  = ( 25,  10,  40)
 HDR_PWR  = ( 45,   5,   5)
+HDR_CLK  = (  5,   5,  35)
+HDR_GAME = ( 25,  20,   0)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
 ACC_SVC  = (255, 140,   0)
 ACC_SET  = (180,  80, 255)
 ACC_PWR  = (255,  60,  60)
+ACC_CLK  = ( 60, 120, 255)
+ACC_GAME = (255, 220,   0)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
 C_RAM    = (145,  85, 255)
@@ -61,11 +72,13 @@ def _font(name, size):
             pass
     return ImageFont.load_default()
 
-F_HDR   = _font("DejaVuSans-Bold.ttf",  9)
-F_LABEL = _font("DejaVuSans.ttf",       8)
-F_VAL   = _font("DejaVuSans-Bold.ttf",  9)
-F_IP    = _font("DejaVuSans.ttf",       9)
-F_FOOT  = _font("DejaVuSans.ttf",       8)
+F_HDR    = _font("DejaVuSans-Bold.ttf",  9)
+F_LABEL  = _font("DejaVuSans.ttf",       8)
+F_VAL    = _font("DejaVuSans-Bold.ttf",  9)
+F_IP     = _font("DejaVuSans.ttf",       9)
+F_FOOT   = _font("DejaVuSans.ttf",       8)
+F_CLOCK  = _font("DejaVuSans-Bold.ttf", 26)
+F_CLKSEC = _font("DejaVuSans-Bold.ttf", 14)
 
 # ── data ──────────────────────────────────────────────────────────────────────
 data = dict(
@@ -385,6 +398,53 @@ def draw_services():
     _footer(d)
     return img
 
+# ── page 4 – clock ───────────────────────────────────────────────────────────
+def draw_clock():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W - 1, 14], fill=HDR_CLK)
+    d.rectangle([0, 0, 3, 14], fill=ACC_CLK)
+    pg = f"{page + 1}/{PAGES}"
+    d.text((W - _tw(d, pg, F_FOOT) - 4, 3), pg, font=F_FOOT, fill=T_DIM)
+
+    hm   = time.strftime("%H:%M")
+    ss   = time.strftime(":%S")
+    day  = time.strftime("%A")
+    date = time.strftime("%d %b %Y")
+
+    d.text(((W - _tw(d, hm,  F_CLOCK))  // 2, 18), hm,  font=F_CLOCK,  fill=T_PRI)
+    d.text(((W - _tw(d, ss,  F_CLKSEC)) // 2, 52), ss,  font=F_CLKSEC, fill=T_SEC)
+    _sep(d, 72)
+    d.text(((W - _tw(d, day,  F_LABEL)) // 2, 76), day,  font=F_LABEL, fill=ACC_CLK)
+    d.text(((W - _tw(d, date, F_LABEL)) // 2, 90), date, font=F_LABEL, fill=T_SEC)
+    _sep(d, 112)
+    d.text((4, 115), f"up {data['uptime']}", font=F_FOOT, fill=T_DIM)
+    return img
+
+# ── page 5 – games hub ───────────────────────────────────────────────────────
+def draw_games():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W - 1, 15], fill=HDR_GAME)
+    d.rectangle([0, 0, 3, 15], fill=ACC_GAME)
+    d.text((8, 3), "GAMES", font=F_HDR, fill=T_PRI)
+    pg = f"{page + 1}/{PAGES}"
+    d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
+
+    y = 24
+    for i, name in enumerate(GAME_LIST):
+        sel = (game_sel == i)
+        if sel:
+            d.rectangle([0, y - 3, W - 1, y + 17], fill=(40, 35, 0))
+            d.rectangle([0, y - 3, 3,     y + 17], fill=ACC_GAME)
+        d.text((10, y + 3), name, font=F_VAL,
+               fill=ACC_GAME if sel else T_DIM)
+        y += 26
+
+    _sep(d, 107)
+    d.text((4, 110), "UP/DN: pick   PRESS: play", font=F_FOOT, fill=T_DIM)
+    return img
+
 # ── settings page ─────────────────────────────────────────────────────────────
 def draw_settings():
     img = Image.new("RGB", (W, H), BG)
@@ -461,15 +521,20 @@ settings_sel  = 0
 sleep_idx     = 0
 power_open    = False
 power_sel     = 0   # 0=Reboot  1=Power Off
+game_sel      = 0   # selected game in hub menu
+game_active   = False
 
 _load_settings()
 
 def render():
-    if power_open:           img = draw_power()
-    elif settings_open:      img = draw_settings()
-    elif page == 0:          img = draw_system()
-    elif page == 1:          img = draw_network()
-    else:                    img = draw_services()
+    if power_open:              img = draw_power()
+    elif settings_open:         img = draw_settings()
+    elif page == PAGE_SYS:      img = draw_system()
+    elif page == PAGE_NET:      img = draw_network()
+    elif page == PAGE_SVC:      img = draw_services()
+    elif page == PAGE_CLK:      img = draw_clock()
+    elif page == PAGE_GAMES:    img = draw_games()
+    else:                       img = draw_system()
     with _lock:
         lcd.LCD_ShowImage(img)
 
@@ -493,56 +558,64 @@ running      = True
 _fetch_now   = threading.Event()   # set by KEY3 or page change to trigger immediate fetch
 
 def _bg_fetch():
-    last = [0.0, 0.0, 0.0]                         # last fetch time: sys, net, svc
-    ivs  = [REFRESH, REFRESH, REFRESH_SVC]
-    fns  = [fetch_system, fetch_network, fetch_services]
+    last     = [0.0, 0.0, 0.0]
+    last_clk = 0.0
+    ivs      = [REFRESH, REFRESH, REFRESH_SVC]
+    fns      = [fetch_system, fetch_network, fetch_services]
 
     while running:
-        now     = time.time()
-        cur     = page
-        fetched = False
+        now = time.time()
+        cur = page
 
-        for i, (fn, iv) in enumerate(zip(fns, ivs)):
-            if now - last[i] >= iv:
-                fn()
-                last[i] = time.time()
-                if i == cur:
-                    fetched = True
+        if not game_active:
+            fetched = False
+            for i, (fn, iv) in enumerate(zip(fns, ivs)):
+                if now - last[i] >= iv:
+                    fn(); last[i] = time.time()
+                    if i == cur: fetched = True
 
-        if fetched and not sleeping and not settings_open and not power_open:
-            render()
+            visible = not sleeping and not settings_open and not power_open
+            clk_tick = (cur == PAGE_CLK and now - last_clk >= 1.0)
+            if clk_tick:
+                last_clk = now
+            if visible and (fetched or clk_tick):
+                render()
 
-        # Wait up to 1 s, or wake immediately on _fetch_now
         _fetch_now.wait(timeout=1.0)
         if _fetch_now.is_set():
             _fetch_now.clear()
-            p = page
-            fns[p]()
-            last[p] = time.time()
-            if not sleeping and not settings_open and not power_open:
-                render()
+            if not game_active:
+                p = page
+                if p < 3:
+                    fns[p](); last[p] = time.time()
+                if not sleeping and not settings_open and not power_open:
+                    render()
 
 # ── button callbacks ──────────────────────────────────────────────────────────
 def _up():
-    global page, settings_sel, power_sel
+    global page, settings_sel, power_sel, game_sel
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
         power_sel = (power_sel - 1) % 2
     elif settings_open:
         settings_sel = (settings_sel - 1) % 2
+    elif page == PAGE_GAMES:
+        game_sel = (game_sel - 1) % len(GAME_LIST)
     else:
         page = (page - 1) % PAGES
     render()
 
 def _down():
-    global page, settings_sel, power_sel
+    global page, settings_sel, power_sel, game_sel
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
         power_sel = (power_sel + 1) % 2
     elif settings_open:
         settings_sel = (settings_sel + 1) % 2
+    elif page == PAGE_GAMES:
+        game_sel = (game_sel + 1) % len(GAME_LIST)
     else:
         page = (page + 1) % PAGES
     render()
@@ -598,14 +671,19 @@ def _toggle_power():
     global power_open, power_sel, settings_open
     if _wake_if_sleeping(): return
     _touch()
+    if game_active: return
     settings_open = False
     power_open    = not power_open
     power_sel     = 0
     render()
 
 def _press():
+    global game_active
     if _wake_if_sleeping(): return
     _touch()
+    if game_active: return
+    if page == PAGE_GAMES:
+        _launch_game(game_sel); return
     if not power_open:
         return
     msg = "REBOOTING..." if power_sel == 0 else "SHUTTING DOWN..."
@@ -616,6 +694,169 @@ def _press():
         lcd.LCD_ShowImage(img)
     time.sleep(0.8)
     subprocess.run(["reboot"] if power_sel == 0 else ["poweroff"])
+
+def _launch_game(idx):
+    global game_active
+    game_active = True
+    fns = [_game_snake, _game_pong, _game_flappy]
+    threading.Thread(target=fns[idx], daemon=True).start()
+
+# ── games ────────────────────────────────────────────────────────────────────
+_SN_CELL = 5
+_SN_COLS = W // _SN_CELL   # 25
+_SN_ROWS = H // _SN_CELL   # 25
+
+def _sn_food(body):
+    while True:
+        c, r = random.randint(0, _SN_COLS-1), random.randint(0, _SN_ROWS-1)
+        if (c, r) not in body:
+            return (c, r)
+
+def _game_snake():
+    global game_active
+    BG_G = (5, 18, 5); SNKC = (0, 190, 80); HEAD = (0, 255, 110); FOOD = (255, 50, 50)
+    snake  = [(12, 12), (11, 12), (10, 12)]
+    direc  = (1, 0);  pend = (1, 0)
+    food   = _sn_food(snake)
+    score  = 0;  step = 0.18
+    last_step = last_inp = time.time()
+
+    while running:
+        now = time.time()
+        if now - last_inp >= 0.08:
+            if   lcd.GPIO_KEY_UP_PIN.value    and direc != (0,  1): pend = (0, -1); last_inp = now
+            elif lcd.GPIO_KEY_DOWN_PIN.value  and direc != (0, -1): pend = (0,  1); last_inp = now
+            elif lcd.GPIO_KEY_LEFT_PIN.value  and direc != (1,  0): pend = (-1, 0); last_inp = now
+            elif lcd.GPIO_KEY_RIGHT_PIN.value and direc != (-1, 0): pend = (1,  0); last_inp = now
+        if lcd.GPIO_KEY2_PIN.value: break
+
+        if now - last_step >= step:
+            direc = pend
+            hx = snake[0][0] + direc[0]
+            hy = snake[0][1] + direc[1]
+            if hx < 0 or hx >= _SN_COLS or hy < 0 or hy >= _SN_ROWS or (hx, hy) in snake:
+                break
+            snake.insert(0, (hx, hy))
+            if (hx, hy) == food:
+                score += 1; food = _sn_food(snake); step = max(0.07, step - 0.008)
+            else:
+                snake.pop()
+            last_step = now
+
+            img = Image.new("RGB", (W, H), BG_G); d = ImageDraw.Draw(img)
+            fx, fy = food
+            d.ellipse([fx*_SN_CELL+1, fy*_SN_CELL+1,
+                       fx*_SN_CELL+_SN_CELL-2, fy*_SN_CELL+_SN_CELL-2], fill=FOOD)
+            for i, (cx, cy) in enumerate(snake):
+                d.rectangle([cx*_SN_CELL, cy*_SN_CELL,
+                             cx*_SN_CELL+_SN_CELL-2, cy*_SN_CELL+_SN_CELL-2],
+                            fill=HEAD if i == 0 else SNKC)
+            d.text((2, 2), str(score), font=F_VAL, fill=T_PRI)
+            with _lock: lcd.LCD_ShowImage(img)
+        time.sleep(0.02)
+
+    img = Image.new("RGB", (W, H), (15, 0, 0)); d = ImageDraw.Draw(img)
+    d.text(((W-_tw(d,"GAME OVER",F_VAL))//2, 50), "GAME OVER", font=F_VAL, fill=C_HOT)
+    d.text(((W-_tw(d,f"Score: {score}",F_LABEL))//2, 66), f"Score: {score}", font=F_LABEL, fill=T_PRI)
+    d.text(((W-_tw(d,"KEY2 to exit",F_FOOT))//2, 86), "KEY2 to exit", font=F_FOOT, fill=T_DIM)
+    with _lock: lcd.LCD_ShowImage(img)
+    while running and not lcd.GPIO_KEY2_PIN.value: time.sleep(0.1)
+    time.sleep(0.3)
+    game_active = False; render()
+
+def _game_pong():
+    global game_active
+    PAD_W=4; PAD_H=22; PL_SPD=3; AI_SPD=2; BALL=4
+    PL_X=5; AI_X=W-5-PAD_W
+    ball=[W//2, H//2]; bvx=2; bvy=2
+    pl_y=H//2-PAD_H//2; ai_y=H//2-PAD_H//2
+    p_sc=0; a_sc=0
+    BG_P=(5,5,20); PLCOL=(0,200,255); AICOL=(255,80,50); BCOL=(255,220,0)
+    FRAME=1.0/30
+
+    while running:
+        t0 = time.time()
+        if lcd.GPIO_KEY_UP_PIN.value:   pl_y = max(0, pl_y - PL_SPD)
+        if lcd.GPIO_KEY_DOWN_PIN.value: pl_y = min(H-PAD_H, pl_y + PL_SPD)
+        if lcd.GPIO_KEY2_PIN.value: break
+
+        ball[0]+=bvx; ball[1]+=bvy
+        if ball[1]<=0:          ball[1]=0;       bvy=abs(bvy)
+        if ball[1]>=H-BALL:     ball[1]=H-BALL;  bvy=-abs(bvy)
+
+        if bvx<0 and ball[0]<=PL_X+PAD_W and pl_y<=ball[1]+BALL and ball[1]<=pl_y+PAD_H:
+            bvx=abs(bvx); rel=(ball[1]+BALL//2-pl_y)/PAD_H; bvy=int((rel-0.5)*5) or 1
+        if bvx>0 and ball[0]+BALL>=AI_X and ball[0]<=AI_X+PAD_W and ai_y<=ball[1]+BALL and ball[1]<=ai_y+PAD_H:
+            bvx=-abs(bvx); rel=(ball[1]+BALL//2-ai_y)/PAD_H; bvy=int((rel-0.5)*5) or -1
+
+        if ball[0]<0:  a_sc+=1; ball=[W//2,H//2]; bvx=-2; bvy=random.choice([-2,2])
+        if ball[0]>W:  p_sc+=1; ball=[W//2,H//2]; bvx=2;  bvy=random.choice([-2,2])
+
+        ac=ai_y+PAD_H//2; bc=ball[1]+BALL//2
+        if ac<bc: ai_y=min(H-PAD_H, ai_y+AI_SPD)
+        elif ac>bc: ai_y=max(0, ai_y-AI_SPD)
+
+        img=Image.new("RGB",(W,H),BG_P); d=ImageDraw.Draw(img)
+        for y in range(0,H,8): d.rectangle([W//2-1,y,W//2,y+4],fill=(25,25,50))
+        d.rectangle([PL_X,pl_y,PL_X+PAD_W-1,pl_y+PAD_H-1],fill=PLCOL)
+        d.rectangle([AI_X,ai_y,AI_X+PAD_W-1,ai_y+PAD_H-1],fill=AICOL)
+        d.rectangle([ball[0],ball[1],ball[0]+BALL-1,ball[1]+BALL-1],fill=BCOL)
+        ps=str(p_sc); as_=str(a_sc)
+        d.text((W//4-_tw(d,ps,F_VAL)//2,2),ps,font=F_VAL,fill=PLCOL)
+        d.text((3*W//4-_tw(d,as_,F_VAL)//2,2),as_,font=F_VAL,fill=AICOL)
+        with _lock: lcd.LCD_ShowImage(img)
+        time.sleep(max(0, FRAME-(time.time()-t0)))
+
+    game_active=False; render()
+
+def _game_flappy():
+    global game_active
+    GRAVITY=0.35; FLAP=-3.5; PIPE_W=14; GAP=40; SCROLL=2; BIRD_X=28; BIRD_S=6
+    bird_y=float(H//2); bird_v=0.0; pipes=[]; score=0; ticks=0
+    prev_up=prev_pr=prev_k3=False
+    BG_F=(5,8,28); PCOL=(30,160,50); BCOL=(255,220,0); GCOL=(30,20,8)
+    FRAME=1.0/30
+
+    while running:
+        t0=time.time(); ticks+=1
+        if ticks%55==0 or not pipes:
+            pipes.append([W+PIPE_W, random.randint(15, H-GAP-15)])
+
+        up_now=lcd.GPIO_KEY_UP_PIN.value
+        pr_now=lcd.GPIO_KEY_PRESS_PIN.value
+        k3_now=lcd.GPIO_KEY3_PIN.value
+        flap=(up_now and not prev_up)or(pr_now and not prev_pr)or(k3_now and not prev_k3)
+        prev_up=up_now; prev_pr=pr_now; prev_k3=k3_now
+        if lcd.GPIO_KEY2_PIN.value: break
+
+        if flap: bird_v=FLAP
+        bird_v+=GRAVITY; bird_y+=bird_v
+        for p in pipes: p[0]-=SCROLL
+        for p in pipes:
+            if p[0]+PIPE_W==BIRD_X: score+=1
+        pipes=[p for p in pipes if p[0]>-PIPE_W]
+
+        bx1=BIRD_X-BIRD_S//2; bx2=BIRD_X+BIRD_S//2
+        by1=int(bird_y-BIRD_S//2); by2=int(bird_y+BIRD_S//2)
+        dead=bird_y<BIRD_S//2 or bird_y>H-BIRD_S//2
+        for px,gy in pipes:
+            if bx2>px and bx1<px+PIPE_W and (by1<gy or by2>gy+GAP): dead=True
+
+        img=Image.new("RGB",(W,H),BG_F); d=ImageDraw.Draw(img)
+        d.rectangle([0,H-5,W-1,H-1],fill=GCOL)
+        for px,gy in pipes:
+            d.rectangle([px,0,px+PIPE_W-1,gy-1],fill=PCOL)
+            d.rectangle([px,gy+GAP,px+PIPE_W-1,H-6],fill=PCOL)
+        d.rectangle([bx1,by1,bx2-1,by2-1],fill=BCOL)
+        sc=str(score); d.text(((W-_tw(d,sc,F_VAL))//2,3),sc,font=F_VAL,fill=T_PRI)
+        if dead:
+            d.text(((W-_tw(d,"DEAD!",F_VAL))//2,H//2-8),"DEAD!",font=F_VAL,fill=C_HOT)
+            with _lock: lcd.LCD_ShowImage(img)
+            time.sleep(1.5); break
+        with _lock: lcd.LCD_ShowImage(img)
+        time.sleep(max(0, FRAME-(time.time()-t0)))
+
+    game_active=False; render()
 
 # ── button polling (replaces when_activated — works on all HAT GPIO pins) ─────
 _BTN_HANDLERS = [
@@ -635,6 +876,10 @@ def _poll_buttons():
     last_fire = [0.0]       * len(_BTN_HANDLERS)
     while running:
         time.sleep(0.05)
+        if game_active:
+            for i, (pin, _) in enumerate(_BTN_HANDLERS):
+                prev[i] = pin.value   # keep prev fresh so no burst on exit
+            continue
         now = time.time()
         for i, (pin, handler) in enumerate(_BTN_HANDLERS):
             curr = pin.value
