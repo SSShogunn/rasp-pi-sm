@@ -15,7 +15,8 @@ import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
 PAGES         = 3
-REFRESH       = 5
+REFRESH       = 5          # seconds between system/network refresh
+REFRESH_SVC   = 30         # seconds between services refresh (apt is slow)
 SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]
 SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
 SERVICES      = [("pihole-FTL", "pihole-FTL"),
@@ -75,6 +76,7 @@ data = dict(
 cpu_cores    = [0, 0, 0, 0]
 svc_statuses = {label: False for label, _ in SERVICES}
 _prev_net    = {"rx": 0, "tx": 0, "t": 0.0}
+_cpu_snap    = None   # previous /proc/stat snapshot for delta CPU calculation
 
 def _run(cmd):
     try:
@@ -84,7 +86,7 @@ def _run(cmd):
     except Exception:
         return ""
 
-# ── fetch ─────────────────────────────────────────────────────────────────────
+# ── fetch (all /proc+/sys reads — no subprocess where avoidable) ──────────────
 def _cpu_stat():
     cores = []
     try:
@@ -98,17 +100,26 @@ def _cpu_stat():
     return cores
 
 def fetch_system():
-    snap1 = _cpu_stat(); time.sleep(0.25); snap2 = _cpu_stat()
-    if snap1 and snap2:
+    global _cpu_snap
+    # CPU: compare against last snapshot (no sleep needed after first call)
+    snap = _cpu_stat()
+    if _cpu_snap is None:
+        # First call — do one quick sample so we have data immediately
+        time.sleep(0.1)
+        snap2 = _cpu_stat()
+    else:
+        snap2, snap = snap, _cpu_snap
+        snap2 = _cpu_stat()
+    if snap and snap2:
         pcts = []
-        for (i1, t1), (i2, t2) in zip(snap1, snap2):
+        for (i1, t1), (i2, t2) in zip(snap, snap2):
             dt = t2 - t1
             pcts.append(max(0, min(100, int((1 - (i2-i1)/dt)*100))) if dt else 0)
         cpu_cores[:] = (pcts + [0]*4)[:4]
         data["cpu"] = str(sum(cpu_cores) // 4)
-    else:
-        data["cpu"] = "--"
+    _cpu_snap = _cpu_stat()
 
+    # RAM — /proc/meminfo
     try:
         mi = {}
         with open("/proc/meminfo") as f:
@@ -124,9 +135,32 @@ def fetch_system():
     except Exception:
         data["ram_used"] = data["ram_cache"] = "--"
 
-    data["temp"]   = _run("vcgencmd measure_temp 2>/dev/null | cut -d'=' -f2 | tr -d \"'C\"") or "--"
-    data["disk"]   = _run("df / | tail -1 | awk '{print $5}' | tr -d '%'") or "--"
-    data["uptime"] = (_run("uptime -p | sed 's/up //'") or "N/A")[:18]
+    # Temp — /sys thermal zone (no subprocess)
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            data["temp"] = f"{int(f.read().strip()) / 1000:.1f}"
+    except Exception:
+        data["temp"] = "--"
+
+    # Disk — os.statvfs (no subprocess)
+    try:
+        s = os.statvfs("/")
+        data["disk"] = str((s.f_blocks - s.f_bfree) * 100 // s.f_blocks)
+    except Exception:
+        data["disk"] = "--"
+
+    # Uptime — /proc/uptime (no subprocess)
+    try:
+        with open("/proc/uptime") as f:
+            secs = int(float(f.read().split()[0]))
+        d, r  = divmod(secs, 86400)
+        h, r  = divmod(r, 3600)
+        m     = r // 60
+        if d:       data["uptime"] = f"{d}d {h}h {m}m"
+        elif h:     data["uptime"] = f"{h}h {m}m"
+        else:       data["uptime"] = f"{m}m"
+    except Exception:
+        data["uptime"] = "N/A"
 
 def _net_bytes():
     try:
@@ -139,8 +173,8 @@ def _net_bytes():
     return 0, 0
 
 def _fmt_rate(bps):
-    if bps < 1024:        return f"{int(bps)}B/s"
-    if bps < 1024*1024:   return f"{bps/1024:.0f}K/s"
+    if bps < 1024:       return f"{int(bps)}B/s"
+    if bps < 1024*1024:  return f"{bps/1024:.0f}K/s"
     return f"{bps/1048576:.1f}M/s"
 
 def fetch_network():
@@ -148,7 +182,19 @@ def fetch_network():
     data["wip"] = _run("ip -4 addr show wlan0 2>/dev/null | grep inet | awk '{print $2}' | cut -d'/' -f1") or "N/A"
     data["uip"] = _run("ip -4 addr show usb0  2>/dev/null | grep inet | awk '{print $2}' | cut -d'/' -f1") or "N/A"
     data["tip"] = _run("tailscale ip -4 2>/dev/null") or "N/A"
-    data["rssi"] = _run("iw dev wlan0 link 2>/dev/null | grep -i signal | awk '{print $2}'") or "--"
+
+    # RSSI — /proc/net/wireless (no subprocess)
+    try:
+        with open("/proc/net/wireless") as f:
+            for line in f:
+                if "wlan0:" in line:
+                    v = int(line.split()[3].rstrip("."))
+                    data["rssi"] = str(v - 256 if v > 0 else v)
+                    break
+    except Exception:
+        data["rssi"] = "--"
+
+    # RX/TX speed — /proc/net/dev delta
     rx, tx = _net_bytes()
     now = time.time()
     dt  = now - _prev_net["t"]
@@ -232,18 +278,15 @@ def draw_system():
     d   = ImageDraw.Draw(img)
     _header(d, "SYSTEM", ACC_SYS, HDR_SYS)
 
-    # CPU average bar
     try:   avg = int(data["cpu"])
     except: avg = 0
     _bar_row(d, 18, "CPU", f"{data['cpu']}%", avg, C_CPU)
 
-    # 4 per-core mini bars
-    cw = (W - 8 - 9) // 4   # 3 gaps × 3px
+    cw = (W - 8 - 9) // 4
     for i, cp in enumerate(cpu_cores):
         cc = C_HOT if cp >= 90 else (C_WARN if cp >= 70 else C_CPU)
         _bar(d, 4 + i*(cw+3), 35, cw, 3, cp, cc)
 
-    # RAM (segmented bar: used=purple | cache=dim-purple | free=track)
     try:   ru = int(data["ram_used"])
     except: ru = 0
     try:   rc = int(data["ram_cache"])
@@ -258,12 +301,10 @@ def draw_system():
     if fu > 0: d.rectangle([5, 57, 5 + fu - 1, 58], fill=C_RAM)
     if fc > 0: d.rectangle([5 + fu, 57, 5 + fu + fc - 1, 58], fill=(70, 40, 120))
 
-    # DISK
     try:   dp = int(data["disk"])
     except: dp = 0
     _bar_row(d, 63, "DISK", f"{data['disk']}%", dp, C_DISK)
 
-    # TEMP + uptime
     _sep(d, 80)
     try:   t = float(data["temp"])
     except: t = 0.0
@@ -282,13 +323,11 @@ def draw_network():
     _header(d, "NETWORK", ACC_NET, HDR_NET)
 
     y = 18
-    # WiFi label + rssi
     d.text((4, y), "WIFI", font=F_LABEL, fill=T_DIM)
     if data["rssi"] != "--":
         rs = f"{data['rssi']}dBm"
         d.text((W - _tw(d, rs, F_LABEL) - 4, y), rs, font=F_LABEL, fill=C_WIFI)
     y += 11
-    # Signal quality bar
     try:
         quality = max(0, min(100, 2 * (int(data["rssi"]) + 100)))
         bcol = C_OK if quality >= 60 else (C_WARN if quality >= 30 else C_HOT)
@@ -299,17 +338,14 @@ def draw_network():
     d.text((4, y), data["wip"], font=F_IP, fill=C_WIFI)
     y += 13; _sep(d, y); y += 5
 
-    # USB: label left, IP right (same line)
     d.text((4, y), "USB", font=F_LABEL, fill=T_DIM)
     d.text((W - _tw(d, data["uip"], F_IP) - 4, y), data["uip"], font=F_IP, fill=C_USB)
     y += 12; _sep(d, y); y += 5
 
-    # Tailscale: abbreviated label to fit IP on same line
     d.text((4, y), "TS", font=F_LABEL, fill=T_DIM)
     d.text((W - _tw(d, data["tip"], F_IP) - 4, y), data["tip"], font=F_IP, fill=C_TS)
     y += 12; _sep(d, y); y += 5
 
-    # RX / TX speed
     rx_s = data["rx_speed"] if data["rx_speed"] != "--" else "..."
     tx_s = data["tx_speed"] if data["tx_speed"] != "--" else "..."
     d.text((4, y), f"RX {rx_s}", font=F_FOOT, fill=C_USB)
@@ -333,7 +369,6 @@ def draw_services():
         d.text((12, y), label, font=F_LABEL, fill=T_PRI)
         d.text((W - _tw(d, status, F_LABEL) - 4, y), status, font=F_LABEL, fill=dot_col)
         y += 14; _sep(d, y); y += 5
-    # y == 75
 
     d.text((4, y), "LAST LOGIN", font=F_LABEL, fill=T_DIM)
     y += 10
@@ -397,10 +432,10 @@ sleep_idx     = 0
 _load_settings()
 
 def render():
-    if settings_open:        img = draw_settings()
-    elif page == 0:          img = draw_system()
-    elif page == 1:          img = draw_network()
-    else:                    img = draw_services()
+    if settings_open:       img = draw_settings()
+    elif page == 0:         img = draw_system()
+    elif page == 1:         img = draw_network()
+    else:                   img = draw_services()
     with _lock:
         lcd.LCD_ShowImage(img)
 
@@ -419,6 +454,40 @@ def _wake_if_sleeping():
         return True
     return False
 
+# ── background fetch thread ───────────────────────────────────────────────────
+running      = True
+_fetch_now   = threading.Event()   # set by KEY3 or page change to trigger immediate fetch
+
+def _bg_fetch():
+    last = [0.0, 0.0, 0.0]                         # last fetch time: sys, net, svc
+    ivs  = [REFRESH, REFRESH, REFRESH_SVC]
+    fns  = [fetch_system, fetch_network, fetch_services]
+
+    while running:
+        now     = time.time()
+        cur     = page
+        fetched = False
+
+        for i, (fn, iv) in enumerate(zip(fns, ivs)):
+            if now - last[i] >= iv:
+                fn()
+                last[i] = time.time()
+                if i == cur:
+                    fetched = True
+
+        if fetched and not sleeping and not settings_open:
+            render()
+
+        # Wait up to 1 s, or wake immediately on _fetch_now
+        _fetch_now.wait(timeout=1.0)
+        if _fetch_now.is_set():
+            _fetch_now.clear()
+            p = page
+            fns[p]()
+            last[p] = time.time()
+            if not sleeping and not settings_open:
+                render()
+
 # ── button callbacks ──────────────────────────────────────────────────────────
 def _up():
     global page, settings_sel
@@ -428,10 +497,7 @@ def _up():
         settings_sel = (settings_sel - 1) % 2
     else:
         page = (page - 1) % PAGES
-        if page == 0:   fetch_system()
-        elif page == 1: fetch_network()
-        else:           fetch_services()
-    render()
+    render()   # instant — uses cached data
 
 def _down():
     global page, settings_sel
@@ -441,9 +507,6 @@ def _down():
         settings_sel = (settings_sel + 1) % 2
     else:
         page = (page + 1) % PAGES
-        if page == 0:   fetch_system()
-        elif page == 1: fetch_network()
-        else:           fetch_services()
     render()
 
 def _left():
@@ -482,11 +545,8 @@ def _toggle_settings():
 def _refresh():
     if _wake_if_sleeping(): return
     _touch()
-    if settings_open: return
-    if page == 0:   fetch_system()
-    elif page == 1: fetch_network()
-    else:           fetch_services()
-    render()
+    if not settings_open:
+        _fetch_now.set()   # wake background thread to fetch current page
 
 lcd.GPIO_KEY_UP_PIN.when_activated    = _up
 lcd.GPIO_KEY_DOWN_PIN.when_activated  = _down
@@ -495,9 +555,7 @@ lcd.GPIO_KEY_RIGHT_PIN.when_activated = _right
 lcd.GPIO_KEY2_PIN.when_activated      = _toggle_settings
 lcd.GPIO_KEY3_PIN.when_activated      = _refresh
 
-# ── signal + main loop ────────────────────────────────────────────────────────
-running = True
-
+# ── signal handler ────────────────────────────────────────────────────────────
 def _sig(s, f):
     global running
     running = False
@@ -505,6 +563,7 @@ def _sig(s, f):
 signal.signal(signal.SIGINT,  _sig)
 signal.signal(signal.SIGTERM, _sig)
 
+# ── startup ───────────────────────────────────────────────────────────────────
 print("Fetching initial data...")
 fetch_system()
 fetch_network()
@@ -514,24 +573,17 @@ with _lock:
 render()
 print("Running – Ctrl-C to quit")
 
-last_sys = last_net = last_svc = time.time()
+_fetch_thread = threading.Thread(target=_bg_fetch, daemon=True)
+_fetch_thread.start()
 
+# ── main loop (sleep timeout only — rendering driven by background thread) ────
 try:
     while running:
-        now = time.time()
-        if not sleeping and not settings_open:
-            if page == 0 and now - last_sys >= REFRESH:
-                fetch_system();   last_sys = time.time(); render()
-            elif page == 1 and now - last_net >= REFRESH:
-                fetch_network();  last_net = time.time(); render()
-            elif page == 2 and now - last_svc >= REFRESH:
-                fetch_services(); last_svc = time.time(); render()
-
+        now        = time.time()
         sleep_secs = SLEEP_PRESETS[sleep_idx]
         if not sleeping and sleep_secs > 0 and (now - last_activity) >= sleep_secs:
             sleeping = True
             with _lock: lcd.bl_DutyCycle(0)
-
         time.sleep(0.1)
 finally:
     print("\nShutting down...")
