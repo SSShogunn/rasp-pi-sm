@@ -17,12 +17,15 @@ cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Pi Dashboard LCD Monitor
 After=multi-user.target
+Wants=dev-spidev0.0.device
+After=dev-spidev0.0.device
 
 [Service]
 Type=simple
+ExecStartPre=/bin/sleep 3
 ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/monitor.py
 WorkingDirectory=${SCRIPT_DIR}
-Restart=on-failure
+Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
