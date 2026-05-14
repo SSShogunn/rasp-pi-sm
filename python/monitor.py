@@ -441,8 +441,9 @@ def draw_games():
                fill=ACC_GAME if sel else T_DIM)
         y += 26
 
-    _sep(d, 107)
-    d.text((4, 110), "UP/DN: pick   PRESS: play", font=F_FOOT, fill=T_DIM)
+    _sep(d, 100)
+    d.text((4, 103), "UP/DN: pick   PRESS: play", font=F_FOOT, fill=T_DIM)
+    d.text((4, 113), "LEFT : back",               font=F_FOOT, fill=T_DIM)
     return img
 
 # ── settings page ─────────────────────────────────────────────────────────────
@@ -621,7 +622,7 @@ def _down():
     render()
 
 def _left():
-    global bl_pct, sleep_idx, power_open
+    global bl_pct, sleep_idx, power_open, page
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
@@ -633,6 +634,11 @@ def _left():
         else:
             sleep_idx = max(0, sleep_idx - 1)
         _save_settings()
+        render()
+        return
+    # On Clock or Games hub: Left exits back to previous page
+    if page in (PAGE_CLK, PAGE_GAMES):
+        page = (page - 1) % PAGES
         render()
 
 def _right():
