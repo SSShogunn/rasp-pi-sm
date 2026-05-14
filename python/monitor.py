@@ -149,8 +149,9 @@ def _pho_ensure_auth():
     return True
 
 def _pho_get(path):
-    headers = {"Cookie": f"sid={_pho_sid}"} if _pho_sid else {}
-    req = urllib.request.Request(f"{PHO_HOST}{path}", headers=headers)
+    sep = "&" if "?" in path else "?"
+    sid_param = f"{sep}sid={_pho_sid}" if _pho_sid else ""
+    req = urllib.request.Request(f"{PHO_HOST}{path}{sid_param}")
     with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read())
 
@@ -333,7 +334,7 @@ def fetch_pihole():
         data["pho_status"] = "?"
     try:
         r = _pho_get("/api/stats/recent_blocked?count=1")
-        doms = r.get("domains", [])
+        doms = r.get("blocked", [])
         data["pho_last"] = doms[0] if doms else "--"
     except Exception:
         data["pho_last"] = "--"
@@ -907,11 +908,10 @@ def _toggle_pihole():
     new_on = (data["pho_status"] != "enabled")
     try:
         body = json.dumps({"blocking": new_on}).encode()
-        hdrs = {"Content-Type": "application/json"}
-        if _pho_sid: hdrs["Cookie"] = f"sid={_pho_sid}"
+        sid_param = f"?sid={_pho_sid}" if _pho_sid else ""
         req = urllib.request.Request(
-            f"{PHO_HOST}/api/dns/blocking",
-            data=body, headers=hdrs, method="POST")
+            f"{PHO_HOST}/api/dns/blocking{sid_param}",
+            data=body, headers={"Content-Type": "application/json"}, method="POST")
         urllib.request.urlopen(req, timeout=5).close()
         data["pho_status"] = "enabled" if new_on else "disabled"
     except Exception:
