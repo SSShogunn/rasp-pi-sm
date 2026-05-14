@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
-Pages: 1=System  2=Network
-Keys:  Up/Down   = navigate pages (normal) / adjust value (settings)
-       Left/Right = switch setting item (settings only)
-       KEY2 = settings menu  KEY3 = refresh  any = wake
+Pages: 1=System  2=Network  3=Services
+Keys:  Up/Down   = navigate pages (normal) / switch setting (settings)
+       Left/Right = adjust value (settings)
+       KEY2 = settings  KEY3 = refresh  any = wake
 Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
@@ -13,40 +13,25 @@ import time, signal, threading, subprocess, os, json
 from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 
-# ── settings persistence ───────────────────────────────────────────────────────
-_SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
-
-def _load_settings():
-    global bl_pct, sleep_idx
-    try:
-        with open(_SETTINGS_FILE) as f:
-            s = json.load(f)
-        bl_pct    = max(10, min(100, int(s.get("bl_pct",   60))))
-        sleep_idx = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
-    except Exception:
-        pass
-
-def _save_settings():
-    try:
-        with open(_SETTINGS_FILE, "w") as f:
-            json.dump({"bl_pct": bl_pct, "sleep_idx": sleep_idx}, f)
-    except Exception:
-        pass
-
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES         = 2
+PAGES         = 3
 REFRESH       = 5
-SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]   # seconds; 0 = never
+SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]
 SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
+SERVICES      = [("pihole-FTL", "pihole-FTL"),
+                 ("Tailscale",  "tailscaled"),
+                 ("SSH",        "ssh")]
 W = H         = 128
 
 # ── palette ───────────────────────────────────────────────────────────────────
 BG       = ( 10,  10,  20)
 HDR_SYS  = (  0,  35,  55)
 HDR_NET  = (  0,  45,  22)
+HDR_SVC  = ( 35,  18,   0)
 HDR_SET  = ( 25,  10,  40)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
+ACC_SVC  = (255, 140,   0)
 ACC_SET  = (180,  80, 255)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
@@ -80,8 +65,16 @@ F_IP    = _font("DejaVuSans.ttf",       9)
 F_FOOT  = _font("DejaVuSans.ttf",       8)
 
 # ── data ──────────────────────────────────────────────────────────────────────
-data = dict(cpu="--", ram="--", temp="--", disk="--", uptime="...",
-            wip="...", uip="...", tip="...")
+data = dict(
+    cpu="--", ram_used="--", ram_cache="--", ram_free="--",
+    temp="--", disk="--", uptime="...",
+    wip="...", uip="...", tip="...",
+    rssi="--", rx_speed="--", tx_speed="--",
+    last_login="...", updates="--",
+)
+cpu_cores    = [0, 0, 0, 0]
+svc_statuses = {label: False for label, _ in SERVICES}
+_prev_net    = {"rx": 0, "tx": 0, "t": 0.0}
 
 def _run(cmd):
     try:
@@ -91,17 +84,115 @@ def _run(cmd):
     except Exception:
         return ""
 
+# ── fetch ─────────────────────────────────────────────────────────────────────
+def _cpu_stat():
+    cores = []
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("cpu") and len(line) > 3 and line[3].isdigit():
+                    v = [int(x) for x in line.split()[1:8]]
+                    cores.append((v[3] + v[4], sum(v)))  # (idle+iowait, total)
+    except Exception:
+        pass
+    return cores
+
 def fetch_system():
-    data["cpu"]    = _run("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1") or "--"
-    data["ram"]    = _run("free | grep Mem | awk '{printf \"%.0f\", $3/$2*100}'") or "--"
-    data["temp"]   = _run("vcgencmd measure_temp | cut -d'=' -f2 | tr -d \"'C\"") or "--"
+    snap1 = _cpu_stat(); time.sleep(0.25); snap2 = _cpu_stat()
+    if snap1 and snap2:
+        pcts = []
+        for (i1, t1), (i2, t2) in zip(snap1, snap2):
+            dt = t2 - t1
+            pcts.append(max(0, min(100, int((1 - (i2-i1)/dt)*100))) if dt else 0)
+        cpu_cores[:] = (pcts + [0]*4)[:4]
+        data["cpu"] = str(sum(cpu_cores) // 4)
+    else:
+        data["cpu"] = "--"
+
+    try:
+        mi = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                mi[k.strip()] = int(v.split()[0])
+        total = mi["MemTotal"]
+        free  = mi["MemFree"]
+        cache = mi.get("Cached", 0) + mi.get("Buffers", 0) + mi.get("SReclaimable", 0)
+        used  = max(0, total - free - cache)
+        data["ram_used"]  = str(used  * 100 // total)
+        data["ram_cache"] = str(min(100 - used*100//total, cache * 100 // total))
+    except Exception:
+        data["ram_used"] = data["ram_cache"] = "--"
+
+    data["temp"]   = _run("vcgencmd measure_temp 2>/dev/null | cut -d'=' -f2 | tr -d \"'C\"") or "--"
     data["disk"]   = _run("df / | tail -1 | awk '{print $5}' | tr -d '%'") or "--"
     data["uptime"] = (_run("uptime -p | sed 's/up //'") or "N/A")[:18]
 
+def _net_bytes():
+    try:
+        with open("/proc/net/dev") as f:
+            for line in f:
+                if "wlan0:" in line:
+                    c = line.split(); return int(c[1]), int(c[9])
+    except Exception:
+        pass
+    return 0, 0
+
+def _fmt_rate(bps):
+    if bps < 1024:        return f"{int(bps)}B/s"
+    if bps < 1024*1024:   return f"{bps/1024:.0f}K/s"
+    return f"{bps/1048576:.1f}M/s"
+
 def fetch_network():
+    global _prev_net
     data["wip"] = _run("ip -4 addr show wlan0 2>/dev/null | grep inet | awk '{print $2}' | cut -d'/' -f1") or "N/A"
     data["uip"] = _run("ip -4 addr show usb0  2>/dev/null | grep inet | awk '{print $2}' | cut -d'/' -f1") or "N/A"
     data["tip"] = _run("tailscale ip -4 2>/dev/null") or "N/A"
+    data["rssi"] = _run("iw dev wlan0 link 2>/dev/null | grep -i signal | awk '{print $2}'") or "--"
+    rx, tx = _net_bytes()
+    now = time.time()
+    dt  = now - _prev_net["t"]
+    if _prev_net["t"] > 0 and dt > 0:
+        data["rx_speed"] = _fmt_rate((rx - _prev_net["rx"]) / dt)
+        data["tx_speed"] = _fmt_rate((tx - _prev_net["tx"]) / dt)
+    _prev_net.update({"rx": rx, "tx": tx, "t": now})
+
+def fetch_services():
+    for label, svc in SERVICES:
+        svc_statuses[label] = (_run(f"systemctl is-active {svc}") == "active")
+    login = _run("last -w 2>/dev/null | head -1")
+    if login and not login.startswith("wtmp") and login.strip():
+        parts = login.split()
+        user  = parts[0] if parts else "?"
+        host  = parts[2] if len(parts) > 2 else ""
+        data["last_login"] = f"{user} {host}"[:20]
+    else:
+        data["last_login"] = "no record"
+    try:
+        n = int(_run("apt list --upgradable 2>/dev/null | grep -c '/'"))
+        data["updates"] = f"{n} pending" if n > 0 else "up to date"
+    except Exception:
+        data["updates"] = "--"
+
+# ── settings persistence ───────────────────────────────────────────────────────
+_SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+
+def _load_settings():
+    global bl_pct, sleep_idx
+    try:
+        with open(_SETTINGS_FILE) as f:
+            s = json.load(f)
+        bl_pct    = max(10, min(100, int(s.get("bl_pct",   60))))
+        sleep_idx = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
+    except Exception:
+        pass
+
+def _save_settings():
+    try:
+        with open(_SETTINGS_FILE, "w") as f:
+            json.dump({"bl_pct": bl_pct, "sleep_idx": sleep_idx}, f)
+    except Exception:
+        pass
 
 # ── draw primitives ───────────────────────────────────────────────────────────
 def _tw(d, text, font):
@@ -121,8 +212,7 @@ def _bar(d, x, y, w, h, pct, color):
 
 def _bar_row(d, y, label, val_str, pct, bar_color):
     d.text((4, y), label, font=F_LABEL, fill=T_SEC)
-    vx = W - _tw(d, val_str, F_VAL) - 4
-    d.text((vx, y), val_str, font=F_VAL, fill=T_PRI)
+    d.text((W - _tw(d, val_str, F_VAL) - 4, y), val_str, font=F_VAL, fill=T_PRI)
     _bar(d, 4, y + 12, W - 8, 4, pct, bar_color)
 
 def _header(d, title, accent, hdr_bg):
@@ -142,26 +232,45 @@ def draw_system():
     d   = ImageDraw.Draw(img)
     _header(d, "SYSTEM", ACC_SYS, HDR_SYS)
 
-    y = 18
-    for label, key, bar_col in (("CPU",  "cpu",  C_CPU),
-                                  ("RAM",  "ram",  C_RAM),
-                                  ("DISK", "disk", C_DISK)):
-        try:   pct = int(float(data[key]))
-        except: pct = 0
-        _bar_row(d, y, label, f"{data[key]}%", pct, bar_col)
-        y += 21
+    # CPU average bar
+    try:   avg = int(data["cpu"])
+    except: avg = 0
+    _bar_row(d, 18, "CPU", f"{data['cpu']}%", avg, C_CPU)
 
-    _sep(d, y)
-    y += 4
+    # 4 per-core mini bars
+    cw = (W - 8 - 9) // 4   # 3 gaps × 3px
+    for i, cp in enumerate(cpu_cores):
+        cc = C_HOT if cp >= 90 else (C_WARN if cp >= 70 else C_CPU)
+        _bar(d, 4 + i*(cw+3), 35, cw, 3, cp, cc)
 
+    # RAM (segmented bar: used=purple | cache=dim-purple | free=track)
+    try:   ru = int(data["ram_used"])
+    except: ru = 0
+    try:   rc = int(data["ram_cache"])
+    except: rc = 0
+    d.text((4, 44), "RAM", font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, f"{data['ram_used']}%", F_VAL) - 4, 44),
+           f"{data['ram_used']}%", font=F_VAL, fill=T_PRI)
+    bw = W - 10
+    d.rectangle([4, 56, 4 + bw - 1, 59], fill=TRACK)
+    fu = max(0, int((bw - 2) * ru / 100))
+    fc = max(0, int((bw - 2) * rc / 100))
+    if fu > 0: d.rectangle([5, 57, 5 + fu - 1, 58], fill=C_RAM)
+    if fc > 0: d.rectangle([5 + fu, 57, 5 + fu + fc - 1, 58], fill=(70, 40, 120))
+
+    # DISK
+    try:   dp = int(data["disk"])
+    except: dp = 0
+    _bar_row(d, 63, "DISK", f"{data['disk']}%", dp, C_DISK)
+
+    # TEMP + uptime
+    _sep(d, 80)
     try:   t = float(data["temp"])
     except: t = 0.0
-    t_col = C_HOT if t >= 70 else (C_WARN if t >= 55 else C_OK)
-    d.text((4, y), "TEMP", font=F_LABEL, fill=T_SEC)
-    d.text((30, y), f"{data['temp']} C", font=F_VAL, fill=t_col)
-    y += 13
-
-    d.text((4, y), data["uptime"], font=F_LABEL, fill=T_DIM)
+    tc = C_HOT if t >= 70 else (C_WARN if t >= 55 else C_OK)
+    d.text((4,  84), "TEMP", font=F_LABEL, fill=T_SEC)
+    d.text((30, 84), f"{data['temp']} C", font=F_VAL, fill=tc)
+    d.text((4,  97), data["uptime"], font=F_LABEL, fill=T_DIM)
 
     _footer(d)
     return img
@@ -172,16 +281,69 @@ def draw_network():
     d   = ImageDraw.Draw(img)
     _header(d, "NETWORK", ACC_NET, HDR_NET)
 
-    y = 19
-    for label, key, col in (("WIFI",      "wip", C_WIFI),
-                              ("USB",       "uip", C_USB),
-                              ("TAILSCALE", "tip", C_TS)):
-        d.text((4, y), label, font=F_LABEL, fill=T_DIM)
-        y += 12
-        d.text((4, y), data[key], font=F_IP, fill=col)
-        y += 14
-        _sep(d, y + 1)
-        y += 5
+    y = 18
+    # WiFi label + rssi
+    d.text((4, y), "WIFI", font=F_LABEL, fill=T_DIM)
+    if data["rssi"] != "--":
+        rs = f"{data['rssi']}dBm"
+        d.text((W - _tw(d, rs, F_LABEL) - 4, y), rs, font=F_LABEL, fill=C_WIFI)
+    y += 11
+    # Signal quality bar
+    try:
+        quality = max(0, min(100, 2 * (int(data["rssi"]) + 100)))
+        bcol = C_OK if quality >= 60 else (C_WARN if quality >= 30 else C_HOT)
+    except Exception:
+        quality, bcol = 0, TRACK
+    _bar(d, 4, y, W - 8, 3, quality, bcol)
+    y += 6
+    d.text((4, y), data["wip"], font=F_IP, fill=C_WIFI)
+    y += 13; _sep(d, y); y += 5
+
+    # USB: label left, IP right (same line)
+    d.text((4, y), "USB", font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, data["uip"], F_IP) - 4, y), data["uip"], font=F_IP, fill=C_USB)
+    y += 12; _sep(d, y); y += 5
+
+    # Tailscale: abbreviated label to fit IP on same line
+    d.text((4, y), "TS", font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, data["tip"], F_IP) - 4, y), data["tip"], font=F_IP, fill=C_TS)
+    y += 12; _sep(d, y); y += 5
+
+    # RX / TX speed
+    rx_s = data["rx_speed"] if data["rx_speed"] != "--" else "..."
+    tx_s = data["tx_speed"] if data["tx_speed"] != "--" else "..."
+    d.text((4, y), f"RX {rx_s}", font=F_FOOT, fill=C_USB)
+    d.text((W - _tw(d, f"TX {tx_s}", F_FOOT) - 4, y), f"TX {tx_s}", font=F_FOOT, fill=C_WIFI)
+
+    _footer(d)
+    return img
+
+# ── page 3 – services ─────────────────────────────────────────────────────────
+def draw_services():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    _header(d, "SERVICES", ACC_SVC, HDR_SVC)
+
+    y = 18
+    for label, _ in SERVICES:
+        active  = svc_statuses.get(label, False)
+        dot_col = C_OK if active else C_HOT
+        status  = "ACTIVE" if active else "STOPPED"
+        d.rectangle([4, y + 2, 8, y + 6], fill=dot_col)
+        d.text((12, y), label, font=F_LABEL, fill=T_PRI)
+        d.text((W - _tw(d, status, F_LABEL) - 4, y), status, font=F_LABEL, fill=dot_col)
+        y += 14; _sep(d, y); y += 5
+    # y == 75
+
+    d.text((4, y), "LAST LOGIN", font=F_LABEL, fill=T_DIM)
+    y += 10
+    d.text((4, y), data["last_login"], font=F_LABEL, fill=T_SEC)
+    y += 10; _sep(d, y); y += 4
+
+    upd     = data["updates"]
+    upd_col = C_WARN if "pending" in upd else (C_OK if "up to date" in upd else T_SEC)
+    d.text((4, y), "UPDATES", font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, upd, F_LABEL) - 4, y), upd, font=F_LABEL, fill=upd_col)
 
     _footer(d)
     return img
@@ -190,44 +352,31 @@ def draw_network():
 def draw_settings():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
-
-    # header
     d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
     d.rectangle([0, 0, 3, 15], fill=ACC_SET)
     d.text((8, 3), "SETTINGS", font=F_HDR, fill=T_PRI)
-    hint = "KEY2=exit"
-    d.text((W - _tw(d, hint, F_FOOT) - 4, 4), hint, font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, "KEY2=exit", F_FOOT) - 4, 4), "KEY2=exit", font=F_FOOT, fill=T_DIM)
 
     n = len(SLEEP_PRESETS) - 1
-    sleep_bar_pct = int(sleep_idx * 100 // n) if n else 100
-
     items = [
-        ("BRIGHTNESS", f"{bl_pct}%",             bl_pct),
-        ("SLEEP TIME",  SLEEP_LABELS[sleep_idx],  sleep_bar_pct),
+        ("BRIGHTNESS", f"{bl_pct}%",            bl_pct),
+        ("SLEEP TIME",  SLEEP_LABELS[sleep_idx], sleep_idx * 100 // n if n else 100),
     ]
-
     y = 20
     for i, (label, val_str, bar_pct) in enumerate(items):
         sel     = (settings_sel == i)
         lbl_col = ACC_SET if sel else T_SEC
         val_col = T_PRI   if sel else T_DIM
         bar_col = ACC_SET if sel else TRACK
-
         if sel:
             d.rectangle([0, y - 2, 3, y + 22], fill=ACC_SET)
-
         d.text((6, y), label, font=F_LABEL, fill=lbl_col)
         d.text((W - _tw(d, val_str, F_VAL) - 4, y), val_str, font=F_VAL, fill=val_col)
         _bar(d, 6, y + 13, W - 12, 4, bar_pct, bar_col)
+        y += 30; _sep(d, y); y += 6
 
-        y += 30
-        _sep(d, y)
-        y += 6
-
-    # control hints
     d.text((4, y + 4),  "UP/DN : switch", font=F_FOOT, fill=T_DIM)
     d.text((4, y + 15), "L/R   : adjust", font=F_FOOT, fill=T_DIM)
-
     _footer(d)
     return img
 
@@ -238,22 +387,20 @@ lcd.LCD_Clear()
 
 _lock         = threading.Lock()
 page          = 0
-bl_pct        = 60          # brightness 10–100
+bl_pct        = 60
 sleeping      = False
 last_activity = time.time()
 settings_open = False
-settings_sel  = 0           # 0 = brightness, 1 = sleep time
-sleep_idx     = 0           # index into SLEEP_PRESETS
+settings_sel  = 0
+sleep_idx     = 0
 
 _load_settings()
 
 def render():
-    if settings_open:
-        img = draw_settings()
-    elif page == 0:
-        img = draw_system()
-    else:
-        img = draw_network()
+    if settings_open:        img = draw_settings()
+    elif page == 0:          img = draw_system()
+    elif page == 1:          img = draw_network()
+    else:                    img = draw_services()
     with _lock:
         lcd.LCD_ShowImage(img)
 
@@ -281,8 +428,9 @@ def _up():
         settings_sel = (settings_sel - 1) % 2
     else:
         page = (page - 1) % PAGES
-        if page == 0: fetch_system()
-        else:         fetch_network()
+        if page == 0:   fetch_system()
+        elif page == 1: fetch_network()
+        else:           fetch_services()
     render()
 
 def _down():
@@ -293,8 +441,9 @@ def _down():
         settings_sel = (settings_sel + 1) % 2
     else:
         page = (page + 1) % PAGES
-        if page == 0: fetch_system()
-        else:         fetch_network()
+        if page == 0:   fetch_system()
+        elif page == 1: fetch_network()
+        else:           fetch_services()
     render()
 
 def _left():
@@ -304,8 +453,7 @@ def _left():
     if settings_open:
         if settings_sel == 0:
             bl_pct = max(10, bl_pct - 10)
-            with _lock:
-                lcd.bl_DutyCycle(bl_pct)
+            with _lock: lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = max(0, sleep_idx - 1)
         _save_settings()
@@ -318,8 +466,7 @@ def _right():
     if settings_open:
         if settings_sel == 0:
             bl_pct = min(100, bl_pct + 10)
-            with _lock:
-                lcd.bl_DutyCycle(bl_pct)
+            with _lock: lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
         _save_settings()
@@ -335,10 +482,10 @@ def _toggle_settings():
 def _refresh():
     if _wake_if_sleeping(): return
     _touch()
-    if settings_open:
-        return
-    if page == 0: fetch_system()
-    else:         fetch_network()
+    if settings_open: return
+    if page == 0:   fetch_system()
+    elif page == 1: fetch_network()
+    else:           fetch_services()
     render()
 
 lcd.GPIO_KEY_UP_PIN.when_activated    = _up
@@ -361,32 +508,29 @@ signal.signal(signal.SIGTERM, _sig)
 print("Fetching initial data...")
 fetch_system()
 fetch_network()
+fetch_services()
 with _lock:
     lcd.bl_DutyCycle(bl_pct)
 render()
 print("Running – Ctrl-C to quit")
 
-last_sys = last_net = time.time()
+last_sys = last_net = last_svc = time.time()
 
 try:
     while running:
         now = time.time()
-
         if not sleeping and not settings_open:
             if page == 0 and now - last_sys >= REFRESH:
-                fetch_system()
-                last_sys = time.time()
-                render()
+                fetch_system();   last_sys = time.time(); render()
             elif page == 1 and now - last_net >= REFRESH:
-                fetch_network()
-                last_net = time.time()
-                render()
+                fetch_network();  last_net = time.time(); render()
+            elif page == 2 and now - last_svc >= REFRESH:
+                fetch_services(); last_svc = time.time(); render()
 
         sleep_secs = SLEEP_PRESETS[sleep_idx]
         if not sleeping and sleep_secs > 0 and (now - last_activity) >= sleep_secs:
             sleeping = True
-            with _lock:
-                lcd.bl_DutyCycle(0)
+            with _lock: lcd.bl_DutyCycle(0)
 
         time.sleep(0.1)
 finally:
