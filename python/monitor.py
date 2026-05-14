@@ -2,9 +2,9 @@
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
 Pages: 1=System  2=Network  3=Services
-Keys:  Up/Down   = navigate pages (normal) / switch setting (settings)
-       Left/Right = adjust value (settings)
-       KEY2 = settings  KEY3 = refresh  any = wake
+Keys:  Up/Down    = navigate pages (normal) / switch setting (settings)
+       Left/Right = adjust value (settings) / Right=confirm (power)
+       KEY2 = settings / cancel power  KEY3 = refresh (or open power from settings)
 Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
@@ -412,8 +412,8 @@ def draw_settings():
         _bar(d, 6, y + 13, W - 12, 4, bar_pct, bar_col)
         y += 30; _sep(d, y); y += 6
 
-    d.text((4, y + 4),  "UP/DN : switch", font=F_FOOT, fill=T_DIM)
-    d.text((4, y + 15), "L/R   : adjust", font=F_FOOT, fill=T_DIM)
+    d.text((4, y + 4),  "UP/DN: switch  L/R: adj", font=F_FOOT, fill=T_DIM)
+    d.text((4, y + 15), "KEY3 : power screen",     font=F_FOOT, fill=T_DIM)
     _footer(d)
     return img
 
@@ -441,8 +441,8 @@ def draw_power():
                fill=col if sel else T_DIM)
 
     _sep(d, 88)
-    d.text((4,  91), "UP/DN : select",  font=F_FOOT, fill=T_DIM)
-    d.text((4, 102), "PRESS : confirm", font=F_FOOT, fill=ACC_PWR)
+    d.text((4,  91), "UP/DN: select   KEY2: back", font=F_FOOT, fill=T_DIM)
+    d.text((4, 102), "RIGHT: confirm",             font=F_FOOT, fill=ACC_PWR)
     _footer(d)
     return img
 
@@ -567,7 +567,7 @@ def _right():
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
-        power_open = False; render(); return
+        _do_power(); return
     if settings_open:
         if settings_sel == 0:
             bl_pct = min(100, bl_pct + 10)
@@ -591,24 +591,19 @@ def _refresh():
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
-        power_open = False; render(); return
-    if not settings_open:
-        _fetch_now.set()   # wake background thread to fetch current page
+        return   # KEY3 does nothing on power screen (use Right to confirm)
+    if settings_open:
+        _open_power(); return   # KEY3 in settings → open power screen
+    _fetch_now.set()   # wake background thread to fetch current page
 
-def _toggle_power():
+def _open_power():
     global power_open, power_sel, settings_open
-    if _wake_if_sleeping(): return
-    _touch()
     settings_open = False
-    power_open    = not power_open
+    power_open    = True
     power_sel     = 0
     render()
 
-def _press():
-    if _wake_if_sleeping(): return
-    _touch()
-    if not power_open:
-        return
+def _do_power():
     msg = "REBOOTING..." if power_sel == 0 else "SHUTTING DOWN..."
     img = Image.new("RGB", (W, H), (25, 0, 0))
     d   = ImageDraw.Draw(img)
@@ -622,8 +617,6 @@ lcd.GPIO_KEY_UP_PIN.when_activated    = _up
 lcd.GPIO_KEY_DOWN_PIN.when_activated  = _down
 lcd.GPIO_KEY_LEFT_PIN.when_activated  = _left
 lcd.GPIO_KEY_RIGHT_PIN.when_activated = _right
-lcd.GPIO_KEY_PRESS_PIN.when_activated = _press
-lcd.GPIO_KEY1_PIN.when_activated      = _toggle_power
 lcd.GPIO_KEY2_PIN.when_activated      = _toggle_settings
 lcd.GPIO_KEY3_PIN.when_activated      = _refresh
 
