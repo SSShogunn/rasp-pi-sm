@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
+<<<<<<< HEAD
 Pages: System · Network · Services · Pi-hole · Games · Settings
+=======
+Pages: System · Network · Services · Games · Settings
+>>>>>>> dcd9ff49fb518ebddab3a04c189d11d225b59f0b
 Keys:  Up/Down    = navigate settings hub / game menu / power select
        Left/Right = page navigate / adjust value inside settings app
        KEY1 = power  KEY2 = settings (jump/back)  KEY3 = refresh  PRESS = confirm / open / toggle
@@ -14,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 PAGES         = 6
 PAGE_SYS      = 0
 PAGE_NET      = 1
@@ -21,6 +26,14 @@ PAGE_SVC      = 2
 PAGE_PHO      = 3
 PAGE_GAMES    = 4
 PAGE_SET      = 5
+=======
+PAGES         = 5
+PAGE_SYS      = 0
+PAGE_NET      = 1
+PAGE_SVC      = 2
+PAGE_GAMES    = 3
+PAGE_SET      = 4
+>>>>>>> dcd9ff49fb518ebddab3a04c189d11d225b59f0b
 
 REFRESH       = 5
 REFRESH_SVC   = 30
@@ -103,9 +116,12 @@ _cpu_snap    = None   # previous /proc/stat snapshot for delta CPU calculation
 _SET_APPS = ["Brightness", "Sleep", "WiFi", "Bluetooth"]
 _SET_COLS = [ACC_SET, (55, 100, 220), C_OK, (0, 185, 230)]
 
+<<<<<<< HEAD
 _pho_sid   = None
 _pho_sid_t = 0.0
 
+=======
+>>>>>>> dcd9ff49fb518ebddab3a04c189d11d225b59f0b
 def _get_rfkill(kind):
     try:
         for entry in sorted(os.listdir("/sys/class/rfkill")):
@@ -747,7 +763,10 @@ set_sel       = 0      # selected row in settings hub
 set_app       = None   # None=hub, 0=Brightness, 1=Sleep, 2=WiFi, 3=BT
 wifi_on       = _get_rfkill("wlan")
 bt_on         = _get_rfkill("bluetooth")
+<<<<<<< HEAD
 pho_password  = ""     # loaded from settings.json
+=======
+>>>>>>> dcd9ff49fb518ebddab3a04c189d11d225b59f0b
 sleep_idx     = 0
 power_open    = False
 power_sel     = 0   # 0=Reboot  1=Power Off
@@ -923,8 +942,11 @@ def _press():
     if _wake_if_sleeping(): return
     _touch()
     if game_active: return
+<<<<<<< HEAD
     if not power_open and page == PAGE_PHO:
         threading.Thread(target=_toggle_pihole, daemon=True).start(); return
+=======
+>>>>>>> dcd9ff49fb518ebddab3a04c189d11d225b59f0b
     if not power_open and page == PAGE_GAMES:
         _launch_game(game_sel); return
     if not power_open and page == PAGE_SET:

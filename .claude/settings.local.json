@@ -7,7 +7,16 @@
       "Bash(cmd /c \"if not exist \\\\\"d:\\\\VSCode-V2\\\\rasp-pi\\\\.vscode\\\\\" mkdir \\\\\"d:\\\\VSCode-V2\\\\rasp-pi\\\\.vscode\\\\\"\")",
       "PowerShell(cmd /c \"dir /s /b d:\\\\VSCode-V2\\\\rasp-pi\")",
       "WebFetch(domain:www.waveshare.com)",
-      "PowerShell(cmd /c \"dir /s /b d:\\\\VSCode-V2\\\\rasp-pi\\\\1.44inch-LCD-HAT-Code\")"
+      "PowerShell(cmd /c \"dir /s /b d:\\\\VSCode-V2\\\\rasp-pi\\\\1.44inch-LCD-HAT-Code\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(mkdir -p \"d:\\\\VSCode-V2\\\\rasp-pi\\\\python\")",
+      "Bash(python -c ' *)",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "d:\\VSCode-V2\\rasp-pi"
     ]
   }
 }
