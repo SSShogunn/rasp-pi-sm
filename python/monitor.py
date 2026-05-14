@@ -84,8 +84,10 @@ F_CLKSEC = _font("DejaVuSans-Bold.ttf", 14)
 data = dict(
     cpu="--", ram_used="--", ram_cache="--", ram_free="--",
     temp="--", disk="--", uptime="...",
+    cpu_freq="--", load="--",
     wip="...", uip="...", tip="...",
     rssi="--", rx_speed="--", tx_speed="--",
+    rx_total="--", tx_total="--",
     last_login="...", updates="--",
 )
 cpu_cores    = [0, 0, 0, 0]
@@ -177,6 +179,22 @@ def fetch_system():
     except Exception:
         data["uptime"] = "N/A"
 
+    # CPU frequency — /sys/cpufreq
+    try:
+        with open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") as f:
+            khz = int(f.read().strip())
+        data["cpu_freq"] = f"{khz // 1000}MHz"
+    except Exception:
+        data["cpu_freq"] = "--"
+
+    # Load average — /proc/loadavg
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+        data["load"] = f"{parts[0]} {parts[1]} {parts[2]}"
+    except Exception:
+        data["load"] = "--"
+
 def _net_bytes():
     try:
         with open("/proc/net/dev") as f:
@@ -191,6 +209,12 @@ def _fmt_rate(bps):
     if bps < 1024:       return f"{int(bps)}B/s"
     if bps < 1024*1024:  return f"{bps/1024:.0f}K/s"
     return f"{bps/1048576:.1f}M/s"
+
+def _fmt_bytes(b):
+    if b < 1024:        return f"{b}B"
+    if b < 1024**2:     return f"{b/1024:.0f}K"
+    if b < 1024**3:     return f"{b/1048576:.1f}M"
+    return f"{b/1073741824:.2f}G"
 
 def fetch_network():
     global _prev_net
@@ -209,13 +233,15 @@ def fetch_network():
     except Exception:
         data["rssi"] = "--"
 
-    # RX/TX speed — /proc/net/dev delta
+    # RX/TX speed + totals — /proc/net/dev
     rx, tx = _net_bytes()
     now = time.time()
     dt  = now - _prev_net["t"]
     if _prev_net["t"] > 0 and dt > 0:
         data["rx_speed"] = _fmt_rate((rx - _prev_net["rx"]) / dt)
         data["tx_speed"] = _fmt_rate((tx - _prev_net["tx"]) / dt)
+    data["rx_total"] = _fmt_bytes(rx)
+    data["tx_total"] = _fmt_bytes(tx)
     _prev_net.update({"rx": rx, "tx": tx, "t": now})
 
 def fetch_services():
@@ -285,7 +311,9 @@ def _header(d, title, accent, hdr_bg):
 
 def _footer(d):
     _sep(d, 112)
-    d.text((4, 115), time.strftime("%H:%M"), font=F_FOOT, fill=T_DIM)
+    d.text((4, 115), f"up {data['uptime']}", font=F_FOOT, fill=T_DIM)
+    t = time.strftime("%H:%M")
+    d.text((W - _tw(d, t, F_FOOT) - 4, 115), t, font=F_FOOT, fill=T_DIM)
 
 # ── page 1 – system ───────────────────────────────────────────────────────────
 def draw_system():
@@ -324,9 +352,22 @@ def draw_system():
     try:   t = float(data["temp"])
     except: t = 0.0
     tc = C_HOT if t >= 70 else (C_WARN if t >= 55 else C_OK)
-    d.text((4,  84), "TEMP", font=F_LABEL, fill=T_SEC)
-    d.text((30, 84), f"{data['temp']} C", font=F_VAL, fill=tc)
-    d.text((4,  97), data["uptime"], font=F_LABEL, fill=T_DIM)
+
+    # row 1: TEMP (left) + CPU freq (right)
+    d.text((4,  83), "TEMP", font=F_LABEL, fill=T_SEC)
+    d.text((30, 83), f"{data['temp']}C", font=F_VAL, fill=tc)
+    d.text((W - _tw(d, data["cpu_freq"], F_LABEL) - 4, 83),
+           data["cpu_freq"], font=F_LABEL, fill=T_DIM)
+
+    # row 2: load average
+    d.text((4,  94), "LOAD", font=F_LABEL, fill=T_SEC)
+    d.text((30, 94), data["load"], font=F_LABEL, fill=T_DIM)
+
+    # row 3: total data in / out
+    rx_s = f"IN  {data['rx_total']}"
+    tx_s = f"OUT {data['tx_total']}"
+    d.text((4,  104), rx_s, font=F_FOOT, fill=C_USB)
+    d.text((W - _tw(d, tx_s, F_FOOT) - 4, 104), tx_s, font=F_FOOT, fill=C_WIFI)
 
     _footer(d)
     return img
