@@ -14,12 +14,11 @@ from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES         = 5
+PAGES         = 4
 PAGE_SYS      = 0
 PAGE_NET      = 1
 PAGE_SVC      = 2
-PAGE_CLK      = 3
-PAGE_GAMES    = 4
+PAGE_GAMES    = 3
 
 REFRESH       = 5
 REFRESH_SVC   = 30
@@ -38,14 +37,12 @@ HDR_NET  = (  0,  45,  22)
 HDR_SVC  = ( 35,  18,   0)
 HDR_SET  = ( 25,  10,  40)
 HDR_PWR  = ( 45,   5,   5)
-HDR_CLK  = (  5,   5,  35)
 HDR_GAME = ( 25,  20,   0)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
 ACC_SVC  = (255, 140,   0)
 ACC_SET  = (180,  80, 255)
 ACC_PWR  = (255,  60,  60)
-ACC_CLK  = ( 60, 120, 255)
 ACC_GAME = (255, 220,   0)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
@@ -77,14 +74,12 @@ F_LABEL  = _font("DejaVuSans.ttf",       8)
 F_VAL    = _font("DejaVuSans-Bold.ttf",  9)
 F_IP     = _font("DejaVuSans.ttf",       9)
 F_FOOT   = _font("DejaVuSans.ttf",       8)
-F_CLOCK  = _font("DejaVuSans-Bold.ttf", 26)
-F_CLKSEC = _font("DejaVuSans-Bold.ttf", 14)
 
 # ── data ──────────────────────────────────────────────────────────────────────
 data = dict(
     cpu="--", ram_used="--", ram_cache="--", ram_free="--",
     temp="--", disk="--", uptime="...",
-    cpu_freq="--", load="--",
+    cpu_freq="--",
     wip="...", uip="...", tip="...",
     rssi="--", rx_speed="--", tx_speed="--",
     rx_total="--", tx_total="--",
@@ -187,13 +182,6 @@ def fetch_system():
     except Exception:
         data["cpu_freq"] = "--"
 
-    # Load average — /proc/loadavg
-    try:
-        with open("/proc/loadavg") as f:
-            parts = f.read().split()
-        data["load"] = f"{parts[0]} {parts[1]} {parts[2]}"
-    except Exception:
-        data["load"] = "--"
 
 def _net_bytes():
     try:
@@ -348,26 +336,21 @@ def draw_system():
     except: dp = 0
     _bar_row(d, 63, "DISK", f"{data['disk']}%", dp, C_DISK)
 
-    _sep(d, 80)
     try:   t = float(data["temp"])
     except: t = 0.0
     tc = C_HOT if t >= 70 else (C_WARN if t >= 55 else C_OK)
 
-    # row 1: TEMP (left) + CPU freq (right)
-    d.text((4,  83), "TEMP", font=F_LABEL, fill=T_SEC)
-    d.text((30, 83), f"{data['temp']}C", font=F_VAL, fill=tc)
-    d.text((W - _tw(d, data["cpu_freq"], F_LABEL) - 4, 83),
+    # TEMP (left) + CPU freq (right)
+    d.text((4,  82), "TEMP", font=F_LABEL, fill=T_SEC)
+    d.text((30, 82), f"{data['temp']}C", font=F_VAL, fill=tc)
+    d.text((W - _tw(d, data["cpu_freq"], F_LABEL) - 4, 82),
            data["cpu_freq"], font=F_LABEL, fill=T_DIM)
 
-    # row 2: load average
-    d.text((4,  94), "LOAD", font=F_LABEL, fill=T_SEC)
-    d.text((30, 94), data["load"], font=F_LABEL, fill=T_DIM)
-
-    # row 3: total data in / out
+    # total data in / out
     rx_s = f"IN  {data['rx_total']}"
     tx_s = f"OUT {data['tx_total']}"
-    d.text((4,  104), rx_s, font=F_FOOT, fill=C_USB)
-    d.text((W - _tw(d, tx_s, F_FOOT) - 4, 104), tx_s, font=F_FOOT, fill=C_WIFI)
+    d.text((4,  95), rx_s, font=F_FOOT, fill=C_USB)
+    d.text((W - _tw(d, tx_s, F_FOOT) - 4, 95), tx_s, font=F_FOOT, fill=C_WIFI)
 
     _footer(d)
     return img
@@ -439,30 +422,7 @@ def draw_services():
     _footer(d)
     return img
 
-# ── page 4 – clock ───────────────────────────────────────────────────────────
-def draw_clock():
-    img = Image.new("RGB", (W, H), BG)
-    d   = ImageDraw.Draw(img)
-    d.rectangle([0, 0, W - 1, 14], fill=HDR_CLK)
-    d.rectangle([0, 0, 3, 14], fill=ACC_CLK)
-    pg = f"{page + 1}/{PAGES}"
-    d.text((W - _tw(d, pg, F_FOOT) - 4, 3), pg, font=F_FOOT, fill=T_DIM)
-
-    hm   = time.strftime("%H:%M")
-    ss   = time.strftime(":%S")
-    day  = time.strftime("%A")
-    date = time.strftime("%d %b %Y")
-
-    d.text(((W - _tw(d, hm,  F_CLOCK))  // 2, 18), hm,  font=F_CLOCK,  fill=T_PRI)
-    d.text(((W - _tw(d, ss,  F_CLKSEC)) // 2, 52), ss,  font=F_CLKSEC, fill=T_SEC)
-    _sep(d, 72)
-    d.text(((W - _tw(d, day,  F_LABEL)) // 2, 76), day,  font=F_LABEL, fill=ACC_CLK)
-    d.text(((W - _tw(d, date, F_LABEL)) // 2, 90), date, font=F_LABEL, fill=T_SEC)
-    _sep(d, 112)
-    d.text((4, 115), f"up {data['uptime']}", font=F_FOOT, fill=T_DIM)
-    return img
-
-# ── page 5 – games hub ───────────────────────────────────────────────────────
+# ── page 4 – games hub ───────────────────────────────────────────────────────
 def draw_games():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
@@ -484,7 +444,7 @@ def draw_games():
 
     _sep(d, 100)
     d.text((4, 103), "UP/DN: pick   PRESS: play", font=F_FOOT, fill=T_DIM)
-    d.text((4, 113), "LEFT : back",               font=F_FOOT, fill=T_DIM)
+    d.text((4, 113), "L/R  : exit",               font=F_FOOT, fill=T_DIM)
     return img
 
 # ── settings page ─────────────────────────────────────────────────────────────
@@ -574,7 +534,6 @@ def render():
     elif page == PAGE_SYS:      img = draw_system()
     elif page == PAGE_NET:      img = draw_network()
     elif page == PAGE_SVC:      img = draw_services()
-    elif page == PAGE_CLK:      img = draw_clock()
     elif page == PAGE_GAMES:    img = draw_games()
     else:                       img = draw_system()
     with _lock:
@@ -600,10 +559,9 @@ running      = True
 _fetch_now   = threading.Event()   # set by KEY3 or page change to trigger immediate fetch
 
 def _bg_fetch():
-    last     = [0.0, 0.0, 0.0]
-    last_clk = 0.0
-    ivs      = [REFRESH, REFRESH, REFRESH_SVC]
-    fns      = [fetch_system, fetch_network, fetch_services]
+    last = [0.0, 0.0, 0.0]
+    ivs  = [REFRESH, REFRESH, REFRESH_SVC]
+    fns  = [fetch_system, fetch_network, fetch_services]
 
     while running:
         now = time.time()
@@ -615,12 +573,7 @@ def _bg_fetch():
                 if now - last[i] >= iv:
                     fn(); last[i] = time.time()
                     if i == cur: fetched = True
-
-            visible = not sleeping and not settings_open and not power_open
-            clk_tick = (cur == PAGE_CLK and now - last_clk >= 1.0)
-            if clk_tick:
-                last_clk = now
-            if visible and (fetched or clk_tick):
+            if fetched and not sleeping and not settings_open and not power_open:
                 render()
 
         _fetch_now.wait(timeout=1.0)
@@ -635,32 +588,26 @@ def _bg_fetch():
 
 # ── button callbacks ──────────────────────────────────────────────────────────
 def _up():
-    global page, settings_sel, power_sel, game_sel
+    global settings_sel, power_sel, game_sel
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
-        power_sel = (power_sel - 1) % 2
+        power_sel = (power_sel - 1) % 2;        render()
     elif settings_open:
-        settings_sel = (settings_sel - 1) % 2
+        settings_sel = (settings_sel - 1) % 2;  render()
     elif page == PAGE_GAMES:
-        game_sel = (game_sel - 1) % len(GAME_LIST)
-    else:
-        page = (page - 1) % PAGES
-    render()
+        game_sel = (game_sel - 1) % len(GAME_LIST); render()
 
 def _down():
-    global page, settings_sel, power_sel, game_sel
+    global settings_sel, power_sel, game_sel
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
-        power_sel = (power_sel + 1) % 2
+        power_sel = (power_sel + 1) % 2;        render()
     elif settings_open:
-        settings_sel = (settings_sel + 1) % 2
+        settings_sel = (settings_sel + 1) % 2;  render()
     elif page == PAGE_GAMES:
-        game_sel = (game_sel + 1) % len(GAME_LIST)
-    else:
-        page = (page + 1) % PAGES
-    render()
+        game_sel = (game_sel + 1) % len(GAME_LIST); render()
 
 def _left():
     global bl_pct, sleep_idx, power_open, page
@@ -674,16 +621,12 @@ def _left():
             with _lock: lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = max(0, sleep_idx - 1)
-        _save_settings()
-        render()
-        return
-    # On Clock or Games hub: Left exits back to previous page
-    if page in (PAGE_CLK, PAGE_GAMES):
-        page = (page - 1) % PAGES
-        render()
+        _save_settings(); render(); return
+    page = (page - 1) % PAGES
+    render()
 
 def _right():
-    global bl_pct, sleep_idx, power_open
+    global bl_pct, sleep_idx, power_open, page
     if _wake_if_sleeping(): return
     _touch()
     if power_open:
@@ -694,8 +637,9 @@ def _right():
             with _lock: lcd.bl_DutyCycle(bl_pct)
         else:
             sleep_idx = min(len(SLEEP_PRESETS) - 1, sleep_idx + 1)
-        _save_settings()
-        render()
+        _save_settings(); render(); return
+    page = (page + 1) % PAGES
+    render()
 
 def _toggle_settings():
     global settings_open, power_open
