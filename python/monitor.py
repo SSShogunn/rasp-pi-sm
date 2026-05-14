@@ -30,10 +30,12 @@ HDR_SYS  = (  0,  35,  55)
 HDR_NET  = (  0,  45,  22)
 HDR_SVC  = ( 35,  18,   0)
 HDR_SET  = ( 25,  10,  40)
+HDR_PWR  = ( 45,   5,   5)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
 ACC_SVC  = (255, 140,   0)
 ACC_SET  = (180,  80, 255)
+ACC_PWR  = (255,  60,  60)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
 C_RAM    = (145,  85, 255)
@@ -415,6 +417,35 @@ def draw_settings():
     _footer(d)
     return img
 
+# ── power page ────────────────────────────────────────────────────────────────
+def draw_power():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W - 1, 15], fill=HDR_PWR)
+    d.rectangle([0, 0, 3, 15], fill=ACC_PWR)
+    d.text((8, 3), "POWER", font=F_HDR, fill=T_PRI)
+    d.text((W - _tw(d, "KEY1=back", F_FOOT) - 4, 4), "KEY1=back", font=F_FOOT, fill=T_DIM)
+
+    labels = [("REBOOT",    (255, 140, 40)),
+              ("POWER OFF", (255,  60, 60))]
+    y0, row_h = 20, 32
+    for i, (label, col) in enumerate(labels):
+        y   = y0 + i * row_h
+        sel = (power_sel == i)
+        if sel:
+            d.rectangle([0, y, W - 1, y + row_h - 2],
+                        fill=(col[0] // 6, col[1] // 6, col[2] // 6))
+            d.rectangle([0, y, 3, y + row_h - 2], fill=col)
+        cx = (W - _tw(d, label, F_VAL)) // 2
+        d.text((cx, y + (row_h - 12) // 2), label, font=F_VAL,
+               fill=col if sel else T_DIM)
+
+    _sep(d, 88)
+    d.text((4,  91), "UP/DN : select",  font=F_FOOT, fill=T_DIM)
+    d.text((4, 102), "PRESS : confirm", font=F_FOOT, fill=ACC_PWR)
+    _footer(d)
+    return img
+
 # ── LCD + state ───────────────────────────────────────────────────────────────
 lcd           = LCD_1in44.LCD()
 lcd.LCD_Init(LCD_1in44.SCAN_DIR_DFT)
@@ -428,14 +459,17 @@ last_activity = time.time()
 settings_open = False
 settings_sel  = 0
 sleep_idx     = 0
+power_open    = False
+power_sel     = 0   # 0=Reboot  1=Power Off
 
 _load_settings()
 
 def render():
-    if settings_open:       img = draw_settings()
-    elif page == 0:         img = draw_system()
-    elif page == 1:         img = draw_network()
-    else:                   img = draw_services()
+    if power_open:           img = draw_power()
+    elif settings_open:      img = draw_settings()
+    elif page == 0:          img = draw_system()
+    elif page == 1:          img = draw_network()
+    else:                    img = draw_services()
     with _lock:
         lcd.LCD_ShowImage(img)
 
@@ -475,7 +509,7 @@ def _bg_fetch():
                 if i == cur:
                     fetched = True
 
-        if fetched and not sleeping and not settings_open:
+        if fetched and not sleeping and not settings_open and not power_open:
             render()
 
         # Wait up to 1 s, or wake immediately on _fetch_now
@@ -485,34 +519,40 @@ def _bg_fetch():
             p = page
             fns[p]()
             last[p] = time.time()
-            if not sleeping and not settings_open:
+            if not sleeping and not settings_open and not power_open:
                 render()
 
 # ── button callbacks ──────────────────────────────────────────────────────────
 def _up():
-    global page, settings_sel
+    global page, settings_sel, power_sel
     if _wake_if_sleeping(): return
     _touch()
-    if settings_open:
+    if power_open:
+        power_sel = (power_sel - 1) % 2
+    elif settings_open:
         settings_sel = (settings_sel - 1) % 2
     else:
         page = (page - 1) % PAGES
-    render()   # instant — uses cached data
+    render()
 
 def _down():
-    global page, settings_sel
+    global page, settings_sel, power_sel
     if _wake_if_sleeping(): return
     _touch()
-    if settings_open:
+    if power_open:
+        power_sel = (power_sel + 1) % 2
+    elif settings_open:
         settings_sel = (settings_sel + 1) % 2
     else:
         page = (page + 1) % PAGES
     render()
 
 def _left():
-    global bl_pct, sleep_idx
+    global bl_pct, sleep_idx, power_open
     if _wake_if_sleeping(): return
     _touch()
+    if power_open:
+        power_open = False; render(); return
     if settings_open:
         if settings_sel == 0:
             bl_pct = max(10, bl_pct - 10)
@@ -523,9 +563,11 @@ def _left():
         render()
 
 def _right():
-    global bl_pct, sleep_idx
+    global bl_pct, sleep_idx, power_open
     if _wake_if_sleeping(): return
     _touch()
+    if power_open:
+        power_open = False; render(); return
     if settings_open:
         if settings_sel == 0:
             bl_pct = min(100, bl_pct + 10)
@@ -536,22 +578,52 @@ def _right():
         render()
 
 def _toggle_settings():
-    global settings_open
+    global settings_open, power_open
     if _wake_if_sleeping(): return
     _touch()
+    if power_open:
+        power_open = False; render(); return
     settings_open = not settings_open
     render()
 
 def _refresh():
+    global power_open
     if _wake_if_sleeping(): return
     _touch()
+    if power_open:
+        power_open = False; render(); return
     if not settings_open:
         _fetch_now.set()   # wake background thread to fetch current page
+
+def _toggle_power():
+    global power_open, power_sel, settings_open
+    if _wake_if_sleeping(): return
+    _touch()
+    settings_open = False
+    power_open    = not power_open
+    power_sel     = 0
+    render()
+
+def _press():
+    if _wake_if_sleeping(): return
+    _touch()
+    if not power_open:
+        return
+    msg = "REBOOTING..." if power_sel == 0 else "SHUTTING DOWN..."
+    img = Image.new("RGB", (W, H), (25, 0, 0))
+    d   = ImageDraw.Draw(img)
+    d.text(((W - _tw(d, msg, F_VAL)) // 2, H // 2 - 5), msg, font=F_VAL, fill=ACC_PWR)
+    with _lock:
+        lcd.LCD_ShowImage(img)
+    time.sleep(0.8)
+    subprocess.run(["reboot"] if power_sel == 0 else ["poweroff"])
 
 lcd.GPIO_KEY_UP_PIN.when_activated    = _up
 lcd.GPIO_KEY_DOWN_PIN.when_activated  = _down
 lcd.GPIO_KEY_LEFT_PIN.when_activated  = _left
 lcd.GPIO_KEY_RIGHT_PIN.when_activated = _right
+lcd.GPIO_KEY_PRESS_PIN.when_activated = _press
+lcd.GPIO_KEY1_PIN.when_activated      = _toggle_power
 lcd.GPIO_KEY2_PIN.when_activated      = _toggle_settings
 lcd.GPIO_KEY3_PIN.when_activated      = _refresh
 
