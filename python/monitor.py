@@ -385,7 +385,7 @@ def _ble_notify(sender, raw):
         data["esp_temp"]     = parts[0]
         data["esp_humidity"] = parts[1]
         esp_connected = True
-        if page == PAGE_ESP and not sleeping and not power_open:
+        if page in (PAGE_HOME, PAGE_ESP) and not sleeping and not power_open:
             render()
     except Exception:
         pass
@@ -397,14 +397,14 @@ async def _ble_run():
             esp_connected = False
             async with _BleakClient(ESP_ADDRESS, timeout=15.0) as client:
                 esp_connected = True
-                if page == PAGE_ESP: render()
+                if page in (PAGE_HOME, PAGE_ESP): render()
                 await client.start_notify(ESP_CHAR_UUID, _ble_notify)
                 while running and client.is_connected:
                     await asyncio.sleep(0.5)
         except Exception:
             pass
         esp_connected = False
-        if page == PAGE_ESP: render()
+        if page in (PAGE_HOME, PAGE_ESP): render()
         if running:
             await asyncio.sleep(5)
 
