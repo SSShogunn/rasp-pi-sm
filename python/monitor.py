@@ -78,7 +78,8 @@ try:
         time.sleep(0.1)
 finally:
     log.info("Shutting down...")
+    from PIL import Image
     with state._lock:
         state.lcd.bl_DutyCycle(0)
-        state.lcd.LCD_Clear()
+        state.lcd.LCD_ShowImage(Image.new("RGB", (128, 128), (0, 0, 0)))
         state.lcd.module_exit()
