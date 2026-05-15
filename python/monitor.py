@@ -9,7 +9,7 @@ Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
 
-import time, signal, threading, subprocess, os, json, random, urllib.request, urllib.error, asyncio
+import time, signal, threading, subprocess, os, json, random, urllib.request, urllib.error, urllib.parse, asyncio
 from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
 try:
@@ -19,22 +19,25 @@ except ImportError:
     _BLEAK_OK = False
 
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES         = 7
-PAGE_SYS      = 0
-PAGE_NET      = 1
-PAGE_SVC      = 2
-PAGE_PHO      = 3
-PAGE_ESP      = 4
-PAGE_GAMES    = 5
-PAGE_SET      = 6
+PAGES         = 8
+PAGE_HOME     = 0
+PAGE_SYS      = 1
+PAGE_NET      = 2
+PAGE_SVC      = 3
+PAGE_PHO      = 4
+PAGE_ESP      = 5
+PAGE_GAMES    = 6
+PAGE_SET      = 7
 
 ESP_ADDRESS   = "68:FE:71:0B:AB:BE"
 ESP_CHAR_UUID = "12345678-1234-5678-1234-56789abcdef1"
 
 REFRESH       = 5
+REFRESH_WTH   = 900   # weather every 15 min
 REFRESH_SVC   = 30
 REFRESH_PHO   = 10
 PHO_HOST      = "http://localhost"
+WTH_URL       = "https://api.openweathermap.org/data/2.5/weather"
 SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]
 SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
 SERVICES      = [("pihole-FTL", "pihole-FTL"),
@@ -92,6 +95,7 @@ F_VAL    = _font("DejaVuSans-Bold.ttf",  9)
 F_IP     = _font("DejaVuSans.ttf",       9)
 F_FOOT   = _font("DejaVuSans.ttf",       8)
 F_MED    = _font("DejaVuSans-Bold.ttf", 14)
+F_BIG    = _font("DejaVuSans-Bold.ttf", 22)
 
 # ── data ──────────────────────────────────────────────────────────────────────
 data = dict(
@@ -106,6 +110,8 @@ data = dict(
     pho_gravity="--", pho_clients="--", pho_cached="--",
     pho_status="?", pho_last="--",
     esp_temp="--", esp_humidity="--",
+    wth_temp="--", wth_feels="--", wth_humidity="--",
+    wth_wind="--", wth_desc="--", wth_city="--",
 )
 cpu_cores    = [0, 0, 0, 0]
 svc_statuses = {label: False for label, _ in SERVICES}
@@ -323,6 +329,24 @@ def fetch_services():
     except Exception:
         data["updates"] = "--"
 
+def fetch_weather():
+    if not weather_api_key or not weather_city:
+        return
+    try:
+        city_enc = urllib.parse.quote(weather_city)
+        url = f"{WTH_URL}?q={city_enc}&appid={weather_api_key}&units=metric"
+        with urllib.request.urlopen(url, timeout=10) as r:
+            j = json.loads(r.read())
+        m = j["main"]
+        data["wth_temp"]     = f"{m['temp']:.1f}"
+        data["wth_feels"]    = f"{m['feels_like']:.1f}"
+        data["wth_humidity"] = str(m["humidity"])
+        data["wth_wind"]     = f"{j['wind']['speed']:.1f}"
+        data["wth_desc"]     = j["weather"][0]["description"].title()
+        data["wth_city"]     = j["name"]
+    except Exception:
+        pass
+
 def fetch_pihole():
     if not _pho_ensure_auth():
         data["pho_status"] = "auth err"; return
@@ -393,13 +417,15 @@ def _ble_thread_fn():
 _SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
 def _load_settings():
-    global bl_pct, sleep_idx, pho_password
+    global bl_pct, sleep_idx, pho_password, weather_api_key, weather_city
     try:
         with open(_SETTINGS_FILE) as f:
             s = json.load(f)
-        bl_pct       = max(10, min(100, int(s.get("bl_pct",   60))))
-        sleep_idx    = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
-        pho_password = s.get("pho_password", "")
+        bl_pct          = max(10, min(100, int(s.get("bl_pct",   60))))
+        sleep_idx       = max(0,  min(len(SLEEP_PRESETS) - 1, int(s.get("sleep_idx", 0))))
+        pho_password    = s.get("pho_password",    "")
+        weather_api_key = s.get("weather_api_key", "")
+        weather_city    = s.get("weather_city",    "")
     except Exception:
         pass
 
@@ -407,7 +433,9 @@ def _save_settings():
     try:
         with open(_SETTINGS_FILE, "w") as f:
             json.dump({"bl_pct": bl_pct, "sleep_idx": sleep_idx,
-                       "pho_password": pho_password}, f)
+                       "pho_password": pho_password,
+                       "weather_api_key": weather_api_key,
+                       "weather_city": weather_city}, f)
     except Exception:
         pass
 
@@ -445,7 +473,63 @@ def _footer(d):
     t = time.strftime("%H:%M")
     d.text((W - _tw(d, t, F_FOOT) - 4, 115), t, font=F_FOOT, fill=T_DIM)
 
-# ── page 1 – system ───────────────────────────────────────────────────────────
+# ── page 1 – home ────────────────────────────────────────────────────────────
+def draw_home():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+
+    # Page indicator only (no full header bar)
+    pg = f"{page + 1}/{PAGES}"
+    d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
+
+    # Big 24h clock
+    clk = time.strftime("%H:%M")
+    d.text(((W - _tw(d, clk, F_BIG)) // 2, 2), clk, font=F_BIG, fill=T_PRI)
+
+    # Date
+    date_s = time.strftime("%a, %d %b %Y")
+    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 32), date_s, font=F_LABEL, fill=T_DIM)
+
+    _sep(d, 44)
+
+    # Weather row
+    try:    wt = float(data["wth_temp"]); wcol = C_HOT if wt>=35 else (C_WARN if wt>=28 else C_CPU)
+    except: wcol = T_DIM
+    city_s = data["wth_city"] if data["wth_city"] != "--" else weather_city
+    temp_w = f"{data['wth_temp']}C"
+    d.text((4, 47), (city_s[:13] if city_s else "No city set"), font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, temp_w, F_VAL) - 4, 47), temp_w, font=F_VAL, fill=wcol)
+
+    desc_s = data["wth_desc"]
+    if _tw(d, desc_s, F_LABEL) > W - 8:
+        while desc_s and _tw(d, desc_s+"…", F_LABEL) > W - 8:
+            desc_s = desc_s[:-1]
+        desc_s += "…"
+    d.text((4, 59), desc_s, font=F_LABEL, fill=T_DIM)
+
+    fl_s = f"FL:{data['wth_feels']}C  W:{data['wth_wind']}m/s  H:{data['wth_humidity']}%"
+    d.text((4, 70), fl_s, font=F_FOOT, fill=T_DIM)
+
+    _sep(d, 82)
+
+    # ESP32 room sensor
+    r_col = ACC_ESP if esp_connected else T_DIM
+    room_t = f"ROOM  {data['esp_temp']}C"
+    room_h = f"{data['esp_humidity']}%RH"
+    d.text((4, 85), room_t, font=F_LABEL, fill=r_col)
+    d.text((W - _tw(d, room_h, F_LABEL) - 4, 85), room_h, font=F_LABEL, fill=C_CPU)
+
+    _sep(d, 97)
+    d.text((4, 100), f"up {data['uptime']}", font=F_FOOT, fill=T_DIM)
+    esp_s = "● BLE" if esp_connected else "○ BLE"
+    d.text((W - _tw(d, esp_s, F_FOOT) - 4, 100), esp_s,
+           font=F_FOOT, fill=C_OK if esp_connected else T_DIM)
+
+    _sep(d, 112)
+    d.text((4, 115), "L/R: pages", font=F_FOOT, fill=T_DIM)
+    return img
+
+# ── page 2 – system ───────────────────────────────────────────────────────────
 def draw_system():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
@@ -840,7 +924,9 @@ set_sel       = 0      # selected row in settings hub
 set_app       = None   # None=hub, 0=Brightness, 1=Sleep, 2=WiFi, 3=BT
 wifi_on       = _get_rfkill("wlan")
 bt_on         = _get_rfkill("bluetooth")
-pho_password  = ""     # loaded from settings.json
+pho_password    = ""   # loaded from settings.json
+weather_api_key = ""
+weather_city    = ""
 sleep_idx     = 0
 power_open    = False
 power_sel     = 0   # 0=Reboot  1=Power Off
@@ -851,6 +937,7 @@ _load_settings()
 
 def render():
     if power_open:              img = draw_power()
+    elif page == PAGE_HOME:     img = draw_home()
     elif page == PAGE_SYS:      img = draw_system()
     elif page == PAGE_NET:      img = draw_network()
     elif page == PAGE_SVC:      img = draw_services()
@@ -882,9 +969,10 @@ running      = True
 _fetch_now   = threading.Event()   # set by KEY3 or page change to trigger immediate fetch
 
 def _bg_fetch():
-    last = [0.0, 0.0, 0.0, 0.0]
-    ivs  = [REFRESH, REFRESH, REFRESH_SVC, REFRESH_PHO]
-    fns  = [fetch_system, fetch_network, fetch_services, fetch_pihole]
+    last = [0.0, 0.0, 0.0, 0.0, 0.0]
+    ivs  = [REFRESH_WTH, REFRESH, REFRESH, REFRESH_SVC, REFRESH_PHO]
+    fns  = [fetch_weather, fetch_system, fetch_network, fetch_services, fetch_pihole]
+    _last_clock = 0.0
 
     while running:
         now = time.time()
@@ -897,6 +985,10 @@ def _bg_fetch():
                     fn(); last[i] = time.time()
                     if i == cur: fetched = True
             if fetched and not sleeping and not power_open:
+                render()
+            # Keep home page clock ticking every 30s even without a data fetch
+            if cur == PAGE_HOME and not sleeping and (now - _last_clock) >= 30:
+                _last_clock = now
                 render()
 
         _fetch_now.wait(timeout=1.0)
@@ -1245,6 +1337,7 @@ signal.signal(signal.SIGTERM, _sig)
 
 # ── startup ───────────────────────────────────────────────────────────────────
 print("Fetching initial data...")
+fetch_weather()
 fetch_system()
 fetch_network()
 fetch_services()
