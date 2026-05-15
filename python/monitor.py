@@ -1336,6 +1336,8 @@ signal.signal(signal.SIGINT,  _sig)
 signal.signal(signal.SIGTERM, _sig)
 
 # ── startup ───────────────────────────────────────────────────────────────────
+subprocess.run(["rfkill", "unblock", "bluetooth"], capture_output=True)
+subprocess.run(["bluetoothctl", "power", "on"],    capture_output=True)
 print("Fetching initial data...")
 fetch_weather()
 fetch_system()
