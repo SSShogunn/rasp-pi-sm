@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard  –  sleek dark UI
-Pages: System · Network · Services · Pi-hole · Games · Settings
+Pages: System · Network · Services · Pi-hole · Sensor · Games · Settings
 Keys:  Up/Down    = navigate settings hub / game menu / power select
        Left/Right = page navigate / adjust value inside settings app
        KEY1 = power  KEY2 = settings (jump/back)  KEY3 = refresh  PRESS = confirm / open / toggle
@@ -9,18 +9,27 @@ Run:   cd python && sudo python3 monitor.py
 Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
 """
 
-import time, signal, threading, subprocess, os, json, random, urllib.request, urllib.error
+import time, signal, threading, subprocess, os, json, random, urllib.request, urllib.error, asyncio
 from PIL import Image, ImageDraw, ImageFont
 import LCD_1in44
+try:
+    from bleak import BleakClient as _BleakClient
+    _BLEAK_OK = True
+except ImportError:
+    _BLEAK_OK = False
 
 # ── config ────────────────────────────────────────────────────────────────────
-PAGES         = 6
+PAGES         = 7
 PAGE_SYS      = 0
 PAGE_NET      = 1
 PAGE_SVC      = 2
 PAGE_PHO      = 3
-PAGE_GAMES    = 4
-PAGE_SET      = 5
+PAGE_ESP      = 4
+PAGE_GAMES    = 5
+PAGE_SET      = 6
+
+ESP_ADDRESS   = "68:FE:71:0B:AB:BE"
+ESP_CHAR_UUID = "12345678-1234-5678-1234-56789abcdef1"
 
 REFRESH       = 5
 REFRESH_SVC   = 30
@@ -43,6 +52,7 @@ HDR_SET  = ( 25,  10,  40)
 HDR_PWR  = ( 45,   5,   5)
 HDR_GAME = ( 25,  20,   0)
 HDR_PHO  = ( 35,   5,  12)
+HDR_ESP  = (  5,  35,  30)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
 ACC_SVC  = (255, 140,   0)
@@ -50,6 +60,7 @@ ACC_SET  = (180,  80, 255)
 ACC_PWR  = (255,  60,  60)
 ACC_GAME = (255, 220,   0)
 ACC_PHO  = (255,  75, 110)
+ACC_ESP  = (  0, 210, 180)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
 C_RAM    = (145,  85, 255)
@@ -94,6 +105,7 @@ data = dict(
     pho_total="--", pho_blocked="--", pho_pct="--",
     pho_gravity="--", pho_clients="--", pho_cached="--",
     pho_status="?", pho_last="--",
+    esp_temp="--", esp_humidity="--",
 )
 cpu_cores    = [0, 0, 0, 0]
 svc_statuses = {label: False for label, _ in SERVICES}
@@ -339,6 +351,44 @@ def fetch_pihole():
     except Exception:
         data["pho_last"] = "--"
 
+# ── BLE sensor (ESP32-DHT11) ─────────────────────────────────────────────────
+esp_connected = False
+
+def _ble_notify(sender, raw):
+    global esp_connected
+    try:
+        parts = raw.decode().strip().split(",")
+        data["esp_temp"]     = parts[0]
+        data["esp_humidity"] = parts[1]
+        esp_connected = True
+        if page == PAGE_ESP and not sleeping and not power_open:
+            render()
+    except Exception:
+        pass
+
+async def _ble_run():
+    global esp_connected
+    while running:
+        try:
+            esp_connected = False
+            async with _BleakClient(ESP_ADDRESS, timeout=15.0) as client:
+                esp_connected = True
+                if page == PAGE_ESP: render()
+                await client.start_notify(ESP_CHAR_UUID, _ble_notify)
+                while running and client.is_connected:
+                    await asyncio.sleep(0.5)
+        except Exception:
+            pass
+        esp_connected = False
+        if page == PAGE_ESP: render()
+        if running:
+            await asyncio.sleep(5)
+
+def _ble_thread_fn():
+    if not _BLEAK_OK:
+        return
+    asyncio.run(_ble_run())
+
 # ── settings persistence ───────────────────────────────────────────────────────
 _SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
@@ -562,7 +612,49 @@ def draw_pihole():
     _footer(d)
     return img
 
-# ── page 5 – games hub ───────────────────────────────────────────────────────
+# ── page 5 – esp32 sensor ────────────────────────────────────────────────────
+def draw_esp_sensor():
+    img = Image.new("RGB", (W, H), BG)
+    d   = ImageDraw.Draw(img)
+
+    acc = ACC_ESP if esp_connected else T_DIM
+    _header(d, "SENSOR", acc, HDR_ESP)
+
+    # Temperature
+    temp_s = f"{data['esp_temp']}°C"
+    try:
+        t = float(data["esp_temp"])
+        tcol = C_HOT if t >= 35 else (C_WARN if t >= 28 else C_OK)
+    except Exception:
+        tcol = T_DIM
+    d.text(((W - _tw(d, "TEMPERATURE", F_LABEL)) // 2, 20),
+           "TEMPERATURE", font=F_LABEL, fill=T_SEC)
+    d.text(((W - _tw(d, temp_s, F_MED)) // 2, 31),
+           temp_s, font=F_MED, fill=tcol)
+
+    # Humidity
+    hum_s = f"{data['esp_humidity']}%"
+    try:
+        h = float(data["esp_humidity"])
+        hcol = C_WARN if (h < 30 or h > 70) else C_CPU
+    except Exception:
+        hcol = T_DIM
+    d.text(((W - _tw(d, "HUMIDITY", F_LABEL)) // 2, 57),
+           "HUMIDITY", font=F_LABEL, fill=T_SEC)
+    d.text(((W - _tw(d, hum_s, F_MED)) // 2, 68),
+           hum_s, font=F_MED, fill=hcol)
+
+    _sep(d, 90)
+    status_s = "● CONNECTED" if esp_connected else "● OFFLINE"
+    status_c = C_OK if esp_connected else C_HOT
+    d.text((4, 93), "ESP32-DHT11", font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, status_s, F_LABEL) - 4, 93), status_s,
+           font=F_LABEL, fill=status_c)
+
+    _footer(d)
+    return img
+
+# ── page 6 – games hub ───────────────────────────────────────────────────────
 def draw_games():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
@@ -763,6 +855,7 @@ def render():
     elif page == PAGE_NET:      img = draw_network()
     elif page == PAGE_SVC:      img = draw_services()
     elif page == PAGE_PHO:      img = draw_pihole()
+    elif page == PAGE_ESP:      img = draw_esp_sensor()
     elif page == PAGE_GAMES:    img = draw_games()
     elif page == PAGE_SET:      img = draw_settings_page()
     else:                       img = draw_system()
@@ -1163,8 +1256,10 @@ print("Running – Ctrl-C to quit")
 
 _fetch_thread  = threading.Thread(target=_bg_fetch,      daemon=True)
 _button_thread = threading.Thread(target=_poll_buttons,  daemon=True)
+_ble_thread    = threading.Thread(target=_ble_thread_fn, daemon=True)
 _fetch_thread.start()
 _button_thread.start()
+_ble_thread.start()
 
 # ── main loop (sleep timeout only — rendering driven by background thread) ────
 try:
