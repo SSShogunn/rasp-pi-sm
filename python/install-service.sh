@@ -23,7 +23,9 @@ After=dev-spidev0.0.device
 [Service]
 Type=simple
 ExecStartPre=/bin/sleep 3
+ExecStartPre=/usr/bin/python3 ${SCRIPT_DIR}/lcd_off.py
 ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/monitor.py
+ExecStopPost=/usr/bin/python3 ${SCRIPT_DIR}/lcd_off.py
 WorkingDirectory=${SCRIPT_DIR}
 Restart=always
 RestartSec=5
