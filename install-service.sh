@@ -5,6 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON_DIR="${SCRIPT_DIR}/python"
 SERVICE_NAME="pi-dashboard"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -23,10 +24,10 @@ After=dev-spidev0.0.device
 [Service]
 Type=simple
 ExecStartPre=/bin/sleep 3
-ExecStartPre=/usr/bin/python3 ${SCRIPT_DIR}/lcd_off.py
-ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/monitor.py
-ExecStopPost=/usr/bin/python3 ${SCRIPT_DIR}/lcd_off.py
-WorkingDirectory=${SCRIPT_DIR}
+ExecStartPre=/usr/bin/python3 ${PYTHON_DIR}/lcd_off.py
+ExecStart=/usr/bin/python3 ${PYTHON_DIR}/monitor.py
+ExecStopPost=/usr/bin/python3 ${PYTHON_DIR}/lcd_off.py
+WorkingDirectory=${PYTHON_DIR}
 Restart=always
 RestartSec=5
 StandardOutput=journal
