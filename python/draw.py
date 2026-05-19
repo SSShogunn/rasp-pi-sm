@@ -22,11 +22,12 @@ def _bar(d, x, y, w, h, pct, color):
 def _bar_row(d, y, label, val_str, pct, bar_color):
     d.text((4, y), label, font=F_LABEL, fill=T_SEC)
     d.text((W - _tw(d, val_str, F_VAL) - 4, y), val_str, font=F_VAL, fill=T_PRI)
-    _bar(d, 4, y + 12, W - 8, 4, pct, bar_color)
+    _bar(d, 4, y + 11, W - 8, 6, pct, bar_color)
 
 def _header(d, title, accent, hdr_bg):
     d.rectangle([0, 0, W - 1, 15], fill=hdr_bg)
     d.rectangle([0, 0, 3, 15], fill=accent)
+    d.line([(4, 15), (W - 1, 15)], fill=accent)
     d.text((8, 3), title, font=F_HDR, fill=T_PRI)
     pg = f"{state.page + 1}/{PAGES}"
     d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
@@ -49,38 +50,67 @@ def draw_home():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
 
-    pg = f"{state.page + 1}/{PAGES}"
-    d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
-
+    # ── clock + date ──────────────────────────────────────────────────────────
     clk = time.strftime("%H:%M")
     d.text(((W - _tw(d, clk, F_BIG)) // 2, 2), clk, font=F_BIG, fill=T_PRI)
 
     date_s = time.strftime("%a, %d %b %Y")
-    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 32), date_s, font=F_LABEL, fill=T_DIM)
-    _sep(d, 44)
+    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 30), date_s, font=F_LABEL, fill=T_SEC)
 
-    city_s = state.data["wth_city"] if state.data["wth_city"] != "--" else state.weather_city
+    mx = W // 2
+    d.line([(mx - 22, 42), (mx + 22, 42)], fill=ACC_SYS)
+
+    # ── weather ───────────────────────────────────────────────────────────────
+    city_s = state.data["wth_city"]
+    if city_s in ("--", ""):
+        city_s = state.weather_city or "—"
+    city_s = city_s[:14]
+
     temp_w = f"{state.data['wth_temp']}C"
-    d.text((4, 47), (city_s[:13] if city_s else "No city set"), font=F_LABEL, fill=T_SEC)
-    d.text((W - _tw(d, temp_w, F_VAL) - 4, 47), temp_w, font=F_VAL,
-           fill=_temp_color(state.data["wth_temp"], hot=35, warn=28))
+    tc     = _temp_color(state.data["wth_temp"], hot=35, warn=25)
+    d.text((W - _tw(d, temp_w, F_MED) - 4, 44), temp_w, font=F_MED, fill=tc)
+    d.text((4, 47), city_s, font=F_LABEL, fill=T_SEC)
 
     desc_s = state.data["wth_desc"]
-    if _tw(d, desc_s, F_LABEL) > W - 8:
-        while desc_s and _tw(d, desc_s + "…", F_LABEL) > W - 8:
+    if _tw(d, desc_s, F_FOOT) > W - 8:
+        while desc_s and _tw(d, desc_s + "…", F_FOOT) > W - 8:
             desc_s = desc_s[:-1]
         desc_s += "…"
-    d.text((4, 59), desc_s, font=F_LABEL, fill=T_DIM)
-    d.text((4, 70),
-           f"FL:{state.data['wth_feels']}C  W:{state.data['wth_wind']}m/s  H:{state.data['wth_humidity']}%",
-           font=F_FOOT, fill=T_DIM)
+    d.text((4, 60), desc_s, font=F_FOOT, fill=T_DIM)
 
-    _sep(d, 84)
-    d.text((4, 87), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-    t = time.strftime("%H:%M")
-    d.text((W - _tw(d, t, F_FOOT) - 4, 87), t, font=F_FOOT, fill=T_DIM)
-    _sep(d, 99)
-    d.text((4, 102), "L/R: pages", font=F_FOOT, fill=T_DIM)
+    feels = f"FL {state.data['wth_feels']}C"
+    wind  = f"W {state.data['wth_wind']}m/s"
+    hum   = f"H {state.data['wth_humidity']}%"
+    d.text((4, 70), feels, font=F_FOOT, fill=T_DIM)
+    d.text(((W - _tw(d, wind, F_FOOT)) // 2, 70), wind, font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, hum, F_FOOT) - 4, 70), hum, font=F_FOOT, fill=T_DIM)
+
+    # ── quick system glance ───────────────────────────────────────────────────
+    _sep(d, 81)
+
+    try:   cpu_p = int(state.data["cpu"])
+    except: cpu_p = 0
+    cpu_s = f"{state.data['cpu']}%"
+    tc2   = _temp_color(state.data["temp"], hot=70, warn=55)
+
+    d.text((4, 84),  "CPU", font=F_FOOT, fill=T_DIM)
+    d.text((28, 84), cpu_s, font=F_FOOT, fill=C_CPU)
+    _bar(d, 60, 86, 38, 5, cpu_p, C_CPU)
+    d.text((W - _tw(d, f"{state.data['temp']}C", F_FOOT) - 4, 84),
+           f"{state.data['temp']}C", font=F_FOOT, fill=tc2)
+
+    _sep(d, 97)
+    d.text((4, 100), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
+
+    # ── page dots ─────────────────────────────────────────────────────────────
+    dot_w, dot_gap = 5, 4
+    total_d = PAGES * dot_w + (PAGES - 1) * dot_gap
+    sx = (W - total_d) // 2
+    for i in range(PAGES):
+        x = sx + i * (dot_w + dot_gap)
+        d.rectangle([x, 114, x + dot_w - 1, 117],
+                    fill=ACC_SYS if i == state.page else TRACK)
+
     return img
 
 # ── system ────────────────────────────────────────────────────────────────────
@@ -101,11 +131,11 @@ def draw_system():
     d.text((W - _tw(d, f"{state.data['ram_used']}%", F_VAL) - 4, 38),
            f"{state.data['ram_used']}%", font=F_VAL, fill=T_PRI)
     bw = W - 10
-    d.rectangle([4, 50, 4 + bw - 1, 53], fill=TRACK)
+    d.rectangle([4, 50, 4 + bw - 1, 55], fill=TRACK)
     fu = max(0, int((bw - 2) * ru / 100))
     fc = max(0, int((bw - 2) * rc / 100))
-    if fu > 0: d.rectangle([5, 51, 5 + fu - 1, 52], fill=C_RAM)
-    if fc > 0: d.rectangle([5 + fu, 51, 5 + fu + fc - 1, 52], fill=(70, 40, 120))
+    if fu > 0: d.rectangle([5, 51, 5 + fu - 1, 54], fill=C_RAM)
+    if fc > 0: d.rectangle([5 + fu, 51, 5 + fu + fc - 1, 54], fill=(90, 50, 150))
 
     try:   dp = int(state.data["disk"])
     except: dp = 0
@@ -144,7 +174,7 @@ def draw_network():
         bcol = C_OK if quality >= 60 else (C_WARN if quality >= 30 else C_HOT)
     except Exception:
         quality, bcol = 0, TRACK
-    _bar(d, 4, y, W - 8, 3, quality, bcol)
+    _bar(d, 4, y, W - 8, 5, quality, bcol)
     y += 6
     d.text((4, y), state.data["wip"], font=F_IP, fill=C_WIFI)
     y += 13; _sep(d, y); y += 5
@@ -176,8 +206,8 @@ def draw_services():
         active  = state.svc_statuses.get(label, False)
         dot_col = C_OK if active else C_HOT
         status  = "ACTIVE" if active else "STOPPED"
-        d.rectangle([4, y + 2, 8, y + 6], fill=dot_col)
-        d.text((12, y), label, font=F_LABEL, fill=T_PRI)
+        d.rectangle([3, y + 2, 9, y + 8], fill=dot_col)
+        d.text((14, y), label, font=F_LABEL, fill=T_PRI)
         d.text((W - _tw(d, status, F_LABEL) - 4, y), status, font=F_LABEL, fill=dot_col)
         y += 14; _sep(d, y); y += 5
 
@@ -240,6 +270,7 @@ def draw_games():
     d   = ImageDraw.Draw(img)
     d.rectangle([0, 0, W - 1, 15], fill=HDR_GAME)
     d.rectangle([0, 0, 3, 15], fill=ACC_GAME)
+    d.line([(4, 15), (W - 1, 15)], fill=ACC_GAME)
     d.text((8, 3), "GAMES", font=F_HDR, fill=T_PRI)
     pg = f"{state.page + 1}/{PAGES}"
     d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
@@ -271,7 +302,7 @@ def draw_set_hub():
         sel = (state.set_sel == i)
         if sel:
             d.rectangle([0, y, W - 1, y + 22],
-                        fill=(col[0] // 5, col[1] // 5, col[2] // 5))
+                        fill=(col[0] // 4, col[1] // 4, col[2] // 4))
             d.rectangle([0, y, 3, y + 22], fill=col)
         d.rectangle([6, y + 6, 16, y + 16], fill=col if sel else T_DIM)
         d.text((20, y + 6), name, font=F_LABEL, fill=T_PRI if sel else T_SEC)
@@ -288,6 +319,7 @@ def draw_set_bright():
     d   = ImageDraw.Draw(img)
     d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
     d.rectangle([0, 0, 3, 15], fill=ACC_SET)
+    d.line([(4, 15), (W - 1, 15)], fill=ACC_SET)
     d.text((8, 3), "BRIGHTNESS", font=F_HDR, fill=T_PRI)
     val = f"{state.bl_pct}%"
     d.text(((W - _tw(d, val, F_MED)) // 2, 33), val, font=F_MED, fill=ACC_SET)
@@ -304,6 +336,7 @@ def draw_set_sleep():
     SL_COL = (55, 100, 220)
     d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
     d.rectangle([0, 0, 3, 15], fill=SL_COL)
+    d.line([(4, 15), (W - 1, 15)], fill=SL_COL)
     d.text((8, 3), "SLEEP TIMER", font=F_HDR, fill=T_PRI)
     val = SLEEP_LABELS[state.sleep_idx]
     d.text(((W - _tw(d, val, F_MED)) // 2, 33), val, font=F_MED, fill=SL_COL)
@@ -326,6 +359,7 @@ def draw_set_wifi():
     d   = ImageDraw.Draw(img)
     d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
     d.rectangle([0, 0, 3, 15], fill=C_OK)
+    d.line([(4, 15), (W - 1, 15)], fill=C_OK)
     d.text((8, 3), "WiFi", font=F_HDR, fill=T_PRI)
     dot_col = C_OK if state.wifi_on else C_HOT
     status  = "ON" if state.wifi_on else "OFF"
@@ -348,6 +382,7 @@ def draw_set_bt():
     BT_COL = (0, 185, 230)
     d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
     d.rectangle([0, 0, 3, 15], fill=BT_COL)
+    d.line([(4, 15), (W - 1, 15)], fill=BT_COL)
     d.text((8, 3), "Bluetooth", font=F_HDR, fill=T_PRI)
     dot_col = BT_COL if state.bt_on else C_HOT
     status  = "ON" if state.bt_on else "OFF"
@@ -372,6 +407,7 @@ def draw_power():
     d   = ImageDraw.Draw(img)
     d.rectangle([0, 0, W - 1, 15], fill=HDR_PWR)
     d.rectangle([0, 0, 3, 15], fill=ACC_PWR)
+    d.line([(4, 15), (W - 1, 15)], fill=ACC_PWR)
     d.text((8, 3), "POWER", font=F_HDR, fill=T_PRI)
     d.text((W - _tw(d, "KEY1=back", F_FOOT) - 4, 4), "KEY1=back", font=F_FOOT, fill=T_DIM)
 
