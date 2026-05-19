@@ -29,8 +29,6 @@ def _header(d, title, accent, hdr_bg):
     d.rectangle([0, 0, 3, 15], fill=accent)
     d.line([(4, 15), (W - 1, 15)], fill=accent)
     d.text((8, 3), title, font=F_HDR, fill=T_PRI)
-    pg = f"{state.page + 1}/{PAGES}"
-    d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
 
 def _footer(d):
     _sep(d, 112)
@@ -78,38 +76,22 @@ def draw_home():
         desc_s += "…"
     d.text((4, 60), desc_s, font=F_FOOT, fill=T_DIM)
 
-    feels = f"FL {state.data['wth_feels']}C"
-    wind  = f"W {state.data['wth_wind']}m/s"
-    hum   = f"H {state.data['wth_humidity']}%"
-    d.text((4, 70), feels, font=F_FOOT, fill=T_DIM)
-    d.text(((W - _tw(d, wind, F_FOOT)) // 2, 70), wind, font=F_FOOT, fill=T_DIM)
-    d.text((W - _tw(d, hum, F_FOOT) - 4, 70), hum, font=F_FOOT, fill=T_DIM)
-
     # ── quick system glance ───────────────────────────────────────────────────
-    _sep(d, 81)
+    _sep(d, 73)
 
     try:   cpu_p = int(state.data["cpu"])
     except: cpu_p = 0
     cpu_s = f"{state.data['cpu']}%"
     tc2   = _temp_color(state.data["temp"], hot=70, warn=55)
 
-    d.text((4, 84),  "CPU", font=F_FOOT, fill=T_DIM)
-    d.text((28, 84), cpu_s, font=F_FOOT, fill=C_CPU)
-    _bar(d, 60, 86, 38, 5, cpu_p, C_CPU)
-    d.text((W - _tw(d, f"{state.data['temp']}C", F_FOOT) - 4, 84),
+    d.text((4, 76),  "CPU", font=F_FOOT, fill=T_DIM)
+    d.text((28, 76), cpu_s, font=F_FOOT, fill=C_CPU)
+    _bar(d, 60, 78, 38, 5, cpu_p, C_CPU)
+    d.text((W - _tw(d, f"{state.data['temp']}C", F_FOOT) - 4, 76),
            f"{state.data['temp']}C", font=F_FOOT, fill=tc2)
 
-    _sep(d, 97)
-    d.text((4, 100), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-
-    # ── page dots ─────────────────────────────────────────────────────────────
-    dot_w, dot_gap = 5, 4
-    total_d = PAGES * dot_w + (PAGES - 1) * dot_gap
-    sx = (W - total_d) // 2
-    for i in range(PAGES):
-        x = sx + i * (dot_w + dot_gap)
-        d.rectangle([x, 114, x + dot_w - 1, 117],
-                    fill=ACC_SYS if i == state.page else TRACK)
+    _sep(d, 89)
+    d.text((4, 92), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
 
     return img
 
@@ -272,8 +254,6 @@ def draw_games():
     d.rectangle([0, 0, 3, 15], fill=ACC_GAME)
     d.line([(4, 15), (W - 1, 15)], fill=ACC_GAME)
     d.text((8, 3), "GAMES", font=F_HDR, fill=T_PRI)
-    pg = f"{state.page + 1}/{PAGES}"
-    d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
 
     y = 24
     for i, name in enumerate(GAME_LIST):
