@@ -267,7 +267,7 @@ def draw_set_hub():
     vals = [f"{state.bl_pct}%", SLEEP_LABELS[state.sleep_idx],
             "ON" if state.wifi_on else "OFF", "ON" if state.bt_on else "OFF"]
     y = 18
-    for i, (name, col, val) in enumerate(zip(_SET_APPS, _SET_COLS, vals)):
+    for i, (name, col, val) in enumerate(zip(SET_APPS, SET_COLS, vals)):
         sel = (state.set_sel == i)
         if sel:
             d.rectangle([0, y, W - 1, y + 22],
