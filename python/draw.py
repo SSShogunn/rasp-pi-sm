@@ -74,20 +74,13 @@ def draw_home():
     d.text((4, 70),
            f"FL:{state.data['wth_feels']}C  W:{state.data['wth_wind']}m/s  H:{state.data['wth_humidity']}%",
            font=F_FOOT, fill=T_DIM)
-    _sep(d, 82)
 
-    r_col  = ACC_ESP if state.esp_connected else T_DIM
-    room_h = f"{state.data['esp_humidity']}%RH"
-    d.text((4, 85), f"ROOM  {state.data['esp_temp']}C", font=F_LABEL, fill=r_col)
-    d.text((W - _tw(d, room_h, F_LABEL) - 4, 85), room_h, font=F_LABEL, fill=C_CPU)
-
-    _sep(d, 97)
-    d.text((4, 100), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-    esp_s = "● BLE" if state.esp_connected else "○ BLE"
-    d.text((W - _tw(d, esp_s, F_FOOT) - 4, 100), esp_s,
-           font=F_FOOT, fill=C_OK if state.esp_connected else T_DIM)
-    _sep(d, 112)
-    d.text((4, 115), "L/R: pages", font=F_FOOT, fill=T_DIM)
+    _sep(d, 84)
+    d.text((4, 87), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
+    t = time.strftime("%H:%M")
+    d.text((W - _tw(d, t, F_FOOT) - 4, 87), t, font=F_FOOT, fill=T_DIM)
+    _sep(d, 99)
+    d.text((4, 102), "L/R: pages", font=F_FOOT, fill=T_DIM)
     return img
 
 # ── system ────────────────────────────────────────────────────────────────────
@@ -237,37 +230,6 @@ def draw_pihole():
     d.text((4, 79), last, font=F_LABEL, fill=ACC_PHO)
     _sep(d, 92)
     d.text((4, 95), "PRESS:toggle  K3:refresh", font=F_FOOT, fill=T_DIM)
-
-    _footer(d)
-    return img
-
-# ── esp32 sensor ──────────────────────────────────────────────────────────────
-def draw_esp_sensor():
-    img = Image.new("RGB", (W, H), BG)
-    d   = ImageDraw.Draw(img)
-
-    acc = ACC_ESP if state.esp_connected else T_DIM
-    _header(d, "SENSOR", acc, HDR_ESP)
-
-    temp_s = f"{state.data['esp_temp']}°C"
-    d.text(((W - _tw(d, "TEMPERATURE", F_LABEL)) // 2, 20), "TEMPERATURE", font=F_LABEL, fill=T_SEC)
-    d.text(((W - _tw(d, temp_s, F_MED)) // 2, 31),
-           temp_s, font=F_MED, fill=_temp_color(state.data["esp_temp"], hot=35, warn=28))
-
-    hum_s = f"{state.data['esp_humidity']}%"
-    try:
-        h = float(state.data["esp_humidity"])
-        hcol = C_WARN if (h < 30 or h > 70) else C_CPU
-    except Exception:
-        hcol = T_DIM
-    d.text(((W - _tw(d, "HUMIDITY", F_LABEL)) // 2, 57), "HUMIDITY", font=F_LABEL, fill=T_SEC)
-    d.text(((W - _tw(d, hum_s, F_MED)) // 2, 68), hum_s, font=F_MED, fill=hcol)
-
-    _sep(d, 90)
-    status_s = "● CONNECTED" if state.esp_connected else "● OFFLINE"
-    status_c = C_OK if state.esp_connected else C_HOT
-    d.text((4, 93), "ESP32-DHT11", font=F_LABEL, fill=T_DIM)
-    d.text((W - _tw(d, status_s, F_LABEL) - 4, 93), status_s, font=F_LABEL, fill=status_c)
 
     _footer(d)
     return img
@@ -440,7 +402,6 @@ def render():
     elif state.page == PAGE_NET:     img = draw_network()
     elif state.page == PAGE_SVC:     img = draw_services()
     elif state.page == PAGE_PHO:     img = draw_pihole()
-    elif state.page == PAGE_ESP:     img = draw_esp_sensor()
     elif state.page == PAGE_GAMES:   img = draw_games()
     elif state.page == PAGE_SET:     img = draw_settings_page()
     else:                            img = draw_system()

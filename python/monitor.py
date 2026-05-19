@@ -30,12 +30,11 @@ time.sleep(1)
 subprocess.run(["hciconfig", "hci0",   "up"],        capture_output=True)
 
 # ── imports that depend on state being ready ──────────────────────────────────
-import fetch, ble, draw, games, input_handler
+import fetch, draw, games, input_handler
 from draw import render
 from constants import SLEEP_PRESETS
 
 # ── wire up cross-module references ──────────────────────────────────────────
-ble.set_render(render)
 games.init(state.lcd, state._lock, render)
 
 # ── initial data fetch ────────────────────────────────────────────────────────
@@ -52,12 +51,10 @@ render()
 log.info("Dashboard running — Ctrl-C to quit")
 
 # ── start background threads ──────────────────────────────────────────────────
-_fetch_thread  = threading.Thread(target=fetch.run_bg,            args=(render,), daemon=True)
-_button_thread = threading.Thread(target=input_handler.start_polling,             daemon=True)
-_ble_thread    = threading.Thread(target=ble.thread_fn,                           daemon=True)
+_fetch_thread  = threading.Thread(target=fetch.run_bg,               args=(render,), daemon=True)
+_button_thread = threading.Thread(target=input_handler.start_polling,              daemon=True)
 _fetch_thread.start()
 _button_thread.start()
-_ble_thread.start()
 
 # ── signal handler ────────────────────────────────────────────────────────────
 def _sig(s, f):

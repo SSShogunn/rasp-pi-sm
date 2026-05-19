@@ -1,19 +1,16 @@
 from PIL import ImageFont
 
 # ── page IDs ──────────────────────────────────────────────────────────────────
-PAGES     = 8
+PAGES     = 7
 PAGE_HOME = 0
 PAGE_SYS  = 1
 PAGE_NET  = 2
 PAGE_SVC  = 3
 PAGE_PHO  = 4
-PAGE_ESP  = 5
-PAGE_GAMES= 6
-PAGE_SET  = 7
+PAGE_GAMES= 5
+PAGE_SET  = 6
 
 # ── hardware / API ────────────────────────────────────────────────────────────
-ESP_ADDRESS   = "68:FE:71:0B:AB:BE"
-ESP_CHAR_UUID = "12345678-1234-5678-1234-56789abcdef1"
 PHO_HOST      = "http://localhost"
 WTH_URL       = "https://api.openweathermap.org/data/2.5/weather"
 
@@ -42,7 +39,6 @@ HDR_SET  = ( 25,  10,  40)
 HDR_PWR  = ( 45,   5,   5)
 HDR_GAME = ( 25,  20,   0)
 HDR_PHO  = ( 35,   5,  12)
-HDR_ESP  = (  5,  35,  30)
 ACC_SYS  = (  0, 195, 255)
 ACC_NET  = (  0, 215, 105)
 ACC_SVC  = (255, 140,   0)
@@ -50,7 +46,6 @@ ACC_SET  = (180,  80, 255)
 ACC_PWR  = (255,  60,  60)
 ACC_GAME = (255, 220,   0)
 ACC_PHO  = (255,  75, 110)
-ACC_ESP  = (  0, 210, 180)
 TRACK    = ( 28,  30,  45)
 C_CPU    = (  0, 190, 255)
 C_RAM    = (145,  85, 255)

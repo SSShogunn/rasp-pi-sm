@@ -25,13 +25,11 @@ data = dict(
     pho_total="--", pho_blocked="--", pho_pct="--",
     pho_gravity="--", pho_clients="--", pho_cached="--",
     pho_status="?", pho_last="--",
-    esp_temp="--", esp_humidity="--",
     wth_temp="--", wth_feels="--", wth_humidity="--",
     wth_wind="--", wth_desc="--", wth_city="--",
 )
 svc_statuses  = {label: False for label, _ in SERVICES}
 _prev_net     = {"rx": 0, "tx": 0, "t": 0.0}
-esp_connected = False
 
 # ── LCD ───────────────────────────────────────────────────────────────────────
 lcd   = LCD_1in44.LCD()
