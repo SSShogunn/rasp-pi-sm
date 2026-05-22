@@ -14,6 +14,15 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+VENV_DIR="${SCRIPT_DIR}/.venv"
+PYTHON="${VENV_DIR}/bin/python3"
+
+echo "Setting up virtual environment..."
+python3 -m venv "${VENV_DIR}"
+"${PYTHON}" -m pip install --upgrade pip --quiet
+"${PYTHON}" -m pip install "${SCRIPT_DIR}" --quiet
+echo "Dependencies installed."
+
 cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Pi Dashboard LCD Monitor
@@ -24,9 +33,9 @@ After=dev-spidev0.0.device
 [Service]
 Type=simple
 ExecStartPre=/bin/sleep 3
-ExecStartPre=/usr/bin/python3 ${PYTHON_DIR}/lcd_off.py
-ExecStart=/usr/bin/python3 ${PYTHON_DIR}/monitor.py
-ExecStopPost=/usr/bin/python3 ${PYTHON_DIR}/lcd_off.py
+ExecStartPre=${PYTHON} ${PYTHON_DIR}/lcd_off.py
+ExecStart=${PYTHON} ${PYTHON_DIR}/monitor.py
+ExecStopPost=${PYTHON} ${PYTHON_DIR}/lcd_off.py
 WorkingDirectory=${PYTHON_DIR}
 Restart=always
 RestartSec=5

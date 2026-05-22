@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pi-dashboard"
+version = "0.1.0"
+description = "Dark-themed system dashboard for Raspberry Pi Zero 2W + Waveshare 1.44\" LCD HAT"
+requires-python = ">=3.9"
+dependencies = [
+    "Pillow",
+    "numpy",
+    "spidev",
+    "gpiozero",
+    "psutil",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.pyright]
+include = ["python"]
+extraPaths = ["python"]
+pythonVersion = "3.11"
+pythonPlatform = "Linux"
+reportMissingImports = "none"
+reportMissingModuleSource = "none"
