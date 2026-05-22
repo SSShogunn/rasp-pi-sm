@@ -52,10 +52,10 @@ def draw_home():
     pg = f"{state.page + 1}/{PAGES}"
     d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
 
-    clk = time.strftime("%H:%M")
+    now    = time.localtime()
+    clk    = time.strftime("%H:%M", now)
+    date_s = time.strftime("%a, %d %b %Y", now)
     d.text(((W - _tw(d, clk, F_BIG)) // 2, 2), clk, font=F_BIG, fill=T_PRI)
-
-    date_s = time.strftime("%a, %d %b %Y")
     d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 32), date_s, font=F_LABEL, fill=T_DIM)
     _sep(d, 44)
 
@@ -77,10 +77,10 @@ def draw_home():
 
     _sep(d, 84)
     d.text((4, 87), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-    t = time.strftime("%H:%M")
-    d.text((W - _tw(d, t, F_FOOT) - 4, 87), t, font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, clk, F_FOOT) - 4, 87), clk, font=F_FOOT, fill=T_DIM)
     _sep(d, 99)
-    d.text((4, 102), "L/R: pages", font=F_FOOT, fill=T_DIM)
+    hint = "▼ controls"
+    d.text(((W - _tw(d, hint, F_FOOT)) // 2, 103), hint, font=F_FOOT, fill=T_DIM)
     return img
 
 # ── system ────────────────────────────────────────────────────────────────────
@@ -181,10 +181,10 @@ def draw_services():
         d.text((W - _tw(d, status, F_LABEL) - 4, y), status, font=F_LABEL, fill=dot_col)
         y += 14; _sep(d, y); y += 5
 
-    d.text((4, y), "LAST LOGIN", font=F_LABEL, fill=T_DIM)
-    y += 10
-    d.text((4, y), state.data["last_login"], font=F_LABEL, fill=T_SEC)
-    y += 10; _sep(d, y); y += 4
+    d.text((4, y), "LOAD", font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, state.data["load_avg"], F_LABEL) - 4, y),
+           state.data["load_avg"], font=F_LABEL, fill=T_SEC)
+    y += 13; _sep(d, y); y += 5
 
     upd     = state.data["updates"]
     upd_col = C_WARN if "pending" in upd else (C_OK if "up to date" in upd else T_SEC)
@@ -228,9 +228,6 @@ def draw_pihole():
         last = last[:-1]
     if len(last) < len(state.data["pho_last"]): last += "…"
     d.text((4, 79), last, font=F_LABEL, fill=ACC_PHO)
-    _sep(d, 92)
-    d.text((4, 95), "PRESS:toggle  K3:refresh", font=F_FOOT, fill=T_DIM)
-
     _footer(d)
     return img
 
@@ -253,9 +250,6 @@ def draw_games():
         d.text((10, y + 3), name, font=F_VAL, fill=ACC_GAME if sel else T_DIM)
         y += 26
 
-    _sep(d, 100)
-    d.text((4, 103), "UP/DN: pick   PRESS: play", font=F_FOOT, fill=T_DIM)
-    d.text((4, 113), "L/R  : exit",               font=F_FOOT, fill=T_DIM)
     return img
 
 # ── settings ──────────────────────────────────────────────────────────────────
@@ -265,9 +259,17 @@ def draw_set_hub():
     _header(d, "SETTINGS", ACC_SET, HDR_SET)
 
     vals = [f"{state.bl_pct}%", SLEEP_LABELS[state.sleep_idx],
-            "ON" if state.wifi_on else "OFF", "ON" if state.bt_on else "OFF"]
+            "ON" if state.wifi_on else "OFF",
+            "ON" if state.bt_on else "OFF",
+            "ON" if state.hotspot_on else "OFF"]
+
+    n       = len(SET_APPS)
+    visible = 4
+    offset  = max(0, state.set_sel - (visible - 1))
+
     y = 18
-    for i, (name, col, val) in enumerate(zip(SET_APPS, SET_COLS, vals)):
+    for i in range(offset, min(offset + visible, n)):
+        name, col, val = SET_APPS[i], SET_COLS[i], vals[i]
         sel = (state.set_sel == i)
         if sel:
             d.rectangle([0, y, W - 1, y + 22],
@@ -275,12 +277,17 @@ def draw_set_hub():
             d.rectangle([0, y, 3, y + 22], fill=col)
         d.rectangle([6, y + 6, 16, y + 16], fill=col if sel else T_DIM)
         d.text((20, y + 6), name, font=F_LABEL, fill=T_PRI if sel else T_SEC)
-        d.text((W - _tw(d, val, F_VAL) - 4, y + 6), val,
+        d.text((W - _tw(d, val, F_VAL) - 8, y + 6), val,
                font=F_VAL, fill=T_PRI if sel else T_DIM)
         y += 23
 
-    _sep(d, 112)
-    d.text((4, 115), "PRESS:open  KEY2:exit", font=F_FOOT, fill=T_DIM)
+    # scroll indicator (right edge dots)
+    if n > visible:
+        dot_h  = (visible * 23) // n
+        dot_y  = 18 + offset * (visible * 23) // n
+        d.rectangle([W - 3, 18, W - 1, 18 + visible * 23 - 1], fill=T_DIM)
+        d.rectangle([W - 3, dot_y, W - 1, dot_y + dot_h - 1], fill=ACC_SET)
+
     return img
 
 def draw_set_bright():
@@ -292,9 +299,6 @@ def draw_set_bright():
     val = f"{state.bl_pct}%"
     d.text(((W - _tw(d, val, F_MED)) // 2, 33), val, font=F_MED, fill=ACC_SET)
     _bar(d, 14, 57, W - 28, 7, state.bl_pct, ACC_SET)
-    _sep(d, 74)
-    d.text((4, 77), "L / R : adjust", font=F_FOOT, fill=T_DIM)
-    d.text((4, 89), "KEY2  : back",   font=F_FOOT, fill=T_DIM)
     _footer(d)
     return img
 
@@ -317,8 +321,6 @@ def draw_set_sleep():
                     outline=SL_COL if sel else T_DIM)
         d.text((gx + (sw - 3 - _tw(d, lbl, F_FOOT)) // 2, gy + 1),
                lbl, font=F_FOOT, fill=T_PRI if sel else T_DIM)
-    _sep(d, 102)
-    d.text((4, 105), "L/R: change  KEY2: back", font=F_FOOT, fill=T_DIM)
     return img
 
 def draw_set_wifi():
@@ -336,9 +338,6 @@ def draw_set_wifi():
         d.text((4, y), state.data["wip"], font=F_IP, fill=C_WIFI); y += 13
         if state.data["rssi"] != "--":
             d.text((4, y), f"Signal: {state.data['rssi']}dBm", font=F_LABEL, fill=T_SEC)
-    _sep(d, 88)
-    d.text((4,  91), "PRESS : toggle", font=F_FOOT, fill=T_PRI)
-    d.text((4, 103), "KEY2  : back",   font=F_FOOT, fill=T_DIM)
     _footer(d)
     return img
 
@@ -353,9 +352,26 @@ def draw_set_bt():
     status  = "ON" if state.bt_on else "OFF"
     d.ellipse([14, 26, 28, 40], fill=dot_col)
     d.text((35, 25), status, font=F_MED, fill=dot_col)
-    _sep(d, 88)
-    d.text((4,  91), "PRESS : toggle", font=F_FOOT, fill=T_PRI)
-    d.text((4, 103), "KEY2  : back",   font=F_FOOT, fill=T_DIM)
+    _footer(d)
+    return img
+
+def draw_set_hotspot():
+    img    = Image.new("RGB", (W, H), BG)
+    d      = ImageDraw.Draw(img)
+    HS_COL = (255, 120, 30)
+    d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15], fill=HS_COL)
+    d.text((8, 3), "HOTSPOT", font=F_HDR, fill=T_PRI)
+    dot_col = HS_COL if state.hotspot_on else C_HOT
+    status  = "ON" if state.hotspot_on else "OFF"
+    d.ellipse([14, 26, 28, 40], fill=dot_col)
+    d.text((35, 25), status, font=F_MED, fill=dot_col)
+    y = 50
+    if state.hotspot_on:
+        d.text((4, y), "SSID: Pi-Dash",  font=F_LABEL, fill=T_SEC); y += 13
+        d.text((4, y), "IP:   10.42.0.1", font=F_LABEL, fill=HS_COL)
+    else:
+        d.text((4, y), "Disables WiFi", font=F_LABEL, fill=T_DIM)
     _footer(d)
     return img
 
@@ -364,6 +380,7 @@ def draw_settings_page():
     elif state.set_app == 1: return draw_set_sleep()
     elif state.set_app == 2: return draw_set_wifi()
     elif state.set_app == 3: return draw_set_bt()
+    elif state.set_app == 4: return draw_set_hotspot()
     else:                    return draw_set_hub()
 
 # ── power ─────────────────────────────────────────────────────────────────────
@@ -373,11 +390,9 @@ def draw_power():
     d.rectangle([0, 0, W - 1, 15], fill=HDR_PWR)
     d.rectangle([0, 0, 3, 15], fill=ACC_PWR)
     d.text((8, 3), "POWER", font=F_HDR, fill=T_PRI)
-    d.text((W - _tw(d, "KEY1=back", F_FOOT) - 4, 4), "KEY1=back", font=F_FOOT, fill=T_DIM)
-
     labels = [("REBOOT",    (255, 140, 40)),
               ("POWER OFF", (255,  60, 60))]
-    y0, row_h = 20, 32
+    y0, row_h = 24, 36
     for i, (label, col) in enumerate(labels):
         y   = y0 + i * row_h
         sel = (state.power_sel == i)
@@ -388,15 +403,41 @@ def draw_power():
         cx = (W - _tw(d, label, F_VAL)) // 2
         d.text((cx, y + (row_h - 12) // 2), label, font=F_VAL, fill=col if sel else T_DIM)
 
-    _sep(d, 88)
-    d.text((4,  91), "UP/DN: select  K1/K2: back", font=F_FOOT, fill=T_DIM)
-    d.text((4, 102), "PRESS : confirm",             font=F_FOOT, fill=ACC_PWR)
     _footer(d)
+    return img
+
+# ── hints ─────────────────────────────────────────────────────────────────────
+def draw_hints():
+    HNT_BG  = (18, 14, 30)
+    HNT_ACC = (130, 100, 200)
+    img = Image.new("RGB", (W, H), HNT_BG)
+    d   = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W - 1, 15], fill=(30, 24, 48))
+    d.rectangle([0, 0, 3, 15], fill=HNT_ACC)
+    d.text((8, 3), "CONTROLS", font=F_HDR, fill=T_PRI)
+
+    def row(y, label, val, col=T_SEC):
+        d.text((6, y), label, font=F_FOOT, fill=T_DIM)
+        d.text((W - _tw(d, val, F_FOOT) - 4, y), val, font=F_FOOT, fill=col)
+
+    y = 19
+    row(y, "L / R",   "pages");          y += 12
+    row(y, "UP / DN", "scroll / select"); y += 12
+    row(y, "PRESS",   "confirm / toggle"); y += 12
+    _sep(d, y); y += 4
+    row(y, "KEY1",    "power",   ACC_PWR); y += 12
+    row(y, "KEY2",    "home",    ACC_NET); y += 12
+    row(y, "KEY3",    "back",    ACC_SYS); y += 12
+    _sep(d, y); y += 4
+    row(y, "Pi-hole", "PRESS: toggle",  ACC_PHO); y += 12
+    row(y, "Games",   "PRESS: launch",  ACC_GAME)
+
     return img
 
 # ── render dispatcher ─────────────────────────────────────────────────────────
 def render():
     if   state.power_open:           img = draw_power()
+    elif state.hints_open:           img = draw_hints()
     elif state.page == PAGE_HOME:    img = draw_home()
     elif state.page == PAGE_SYS:     img = draw_system()
     elif state.page == PAGE_NET:     img = draw_network()
