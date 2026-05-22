@@ -1,11 +1,9 @@
-import time, threading, subprocess, logging
+import time, threading, subprocess
 from PIL import Image, ImageDraw
 import state, settings_mgr, pihole_api, games
 import draw
-from constants import (PAGES, PAGE_SYS, PAGE_SET, PAGE_PHO, PAGE_GAMES,
-                       SLEEP_PRESETS, GAME_LIST, W, H, F_VAL, ACC_PWR, T_PRI)
-
-log = logging.getLogger(__name__)
+from constants import (PAGES, PAGE_HOME, PAGE_SET, PAGE_PHO, PAGE_GAMES,
+                       SLEEP_PRESETS, GAME_LIST, SET_APPS, W, H, F_VAL, ACC_PWR)
 
 # ── sleep helpers ─────────────────────────────────────────────────────────────
 def _touch():
@@ -25,28 +23,35 @@ def _wake_if_sleeping():
 def _up():
     if _wake_if_sleeping(): return
     _touch()
+    if state.hints_open:
+        state.hints_open = False; draw.render(); return
     if state.power_open:
         state.power_sel = (state.power_sel - 1) % 2; draw.render()
     elif state.page == PAGE_GAMES:
         state.game_sel = (state.game_sel - 1) % len(GAME_LIST); draw.render()
     elif state.page == PAGE_SET and state.set_app is None:
-        state.set_sel = (state.set_sel - 1) % 4; draw.render()
+        state.set_sel = (state.set_sel - 1) % len(SET_APPS); draw.render()
 
 def _down():
     if _wake_if_sleeping(): return
     _touch()
+    if state.hints_open: return
     if state.power_open:
         state.power_sel = (state.power_sel + 1) % 2; draw.render()
+    elif state.page == PAGE_HOME:
+        state.hints_open = True; draw.render()
     elif state.page == PAGE_GAMES:
         state.game_sel = (state.game_sel + 1) % 3; draw.render()
     elif state.page == PAGE_SET and state.set_app is None:
-        state.set_sel = (state.set_sel + 1) % 4; draw.render()
+        state.set_sel = (state.set_sel + 1) % len(SET_APPS); draw.render()
 
 def _left():
     if _wake_if_sleeping(): return
     _touch()
     if state.power_open:
         state.power_open = False; draw.render(); return
+    if state.hints_open:
+        state.hints_open = False; draw.render(); return
     if state.page == PAGE_SET and state.set_app is not None:
         if state.set_app == 0:
             state.bl_pct = max(10, state.bl_pct - 10)
@@ -64,6 +69,8 @@ def _right():
     _touch()
     if state.power_open:
         state.power_open = False; draw.render(); return
+    if state.hints_open:
+        state.hints_open = False; draw.render(); return
     if state.page == PAGE_SET and state.set_app is not None:
         if state.set_app == 0:
             state.bl_pct = min(100, state.bl_pct + 10)
@@ -76,28 +83,32 @@ def _right():
     state.page = (state.page + 1) % PAGES
     draw.render()
 
-def _key2():
+def _home():
+    if _wake_if_sleeping(): return
+    _touch()
+    state.power_open = False
+    state.hints_open = False
+    state.set_app    = None
+    state.page       = PAGE_HOME
+    draw.render()
+
+def _back():
     if _wake_if_sleeping(): return
     _touch()
     if state.power_open:
         state.power_open = False; draw.render(); return
+    if state.hints_open:
+        state.hints_open = False; draw.render(); return
     if state.set_app is not None:
         state.set_app = None; draw.render(); return
-    if state.page == PAGE_SET:
-        state.page = PAGE_SYS; draw.render(); return
-    state.page = PAGE_SET; draw.render()
-
-def _refresh():
-    if _wake_if_sleeping(): return
-    _touch()
-    if state.power_open:
-        state.power_open = False; draw.render(); return
-    state._fetch_now.set()
+    if state.page != PAGE_HOME:
+        state.page = PAGE_HOME; draw.render()
 
 def _toggle_power():
     if _wake_if_sleeping(): return
     _touch()
     if state.game_active: return
+    state.hints_open = False
     state.power_open = not state.power_open
     state.power_sel  = 0
     draw.render()
@@ -105,10 +116,36 @@ def _toggle_power():
 def _toggle_pihole():
     pihole_api.toggle(draw.render)
 
+def _toggle_wifi():
+    if state.hotspot_on:
+        subprocess.run(["nmcli", "con", "down", "Hotspot"], check=False)
+        state.hotspot_on = False
+    state.wifi_on = not state.wifi_on
+    subprocess.run(["rfkill", "unblock" if state.wifi_on else "block", "wlan"], check=False)
+    if state.wifi_on:
+        subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
+    draw.render()
+
+def _toggle_hotspot():
+    if not state.hotspot_on:
+        subprocess.run(
+            ["nmcli", "device", "wifi", "hotspot",
+             "ifname", "wlan0", "ssid", "Pi-Dash", "password", "raspberry"],
+            check=False)
+        state.hotspot_on = True
+        state.wifi_on    = False
+    else:
+        subprocess.run(["nmcli", "con", "down", "Hotspot"], check=False)
+        subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
+        state.hotspot_on = False
+        state.wifi_on    = state._get_rfkill("wlan")
+    draw.render()
+
 def _press():
     if _wake_if_sleeping(): return
     _touch()
     if state.game_active: return
+    if state.hints_open: return
     if not state.power_open and state.page == PAGE_PHO:
         threading.Thread(target=_toggle_pihole, daemon=True).start(); return
     if not state.power_open and state.page == PAGE_GAMES:
@@ -117,13 +154,13 @@ def _press():
         if state.set_app is None:
             state.set_app = state.set_sel; draw.render(); return
         elif state.set_app == 2:
-            state.wifi_on = not state.wifi_on
-            subprocess.run(["rfkill", "unblock" if state.wifi_on else "block", "wlan"], check=False)
-            draw.render(); return
+            threading.Thread(target=_toggle_wifi, daemon=True).start(); return
         elif state.set_app == 3:
             state.bt_on = not state.bt_on
             subprocess.run(["rfkill", "unblock" if state.bt_on else "block", "bluetooth"], check=False)
             draw.render(); return
+        elif state.set_app == 4:
+            threading.Thread(target=_toggle_hotspot, daemon=True).start(); return
     if not state.power_open:
         return
     msg = "REBOOTING..." if state.power_sel == 0 else "SHUTTING DOWN..."
@@ -148,8 +185,8 @@ def start_polling():
         (lcd.GPIO_KEY_RIGHT_PIN, _right),
         (lcd.GPIO_KEY_PRESS_PIN, _press),
         (lcd.GPIO_KEY1_PIN,      _toggle_power),
-        (lcd.GPIO_KEY2_PIN,      _key2),
-        (lcd.GPIO_KEY3_PIN,      _refresh),
+        (lcd.GPIO_KEY2_PIN,      _home),
+        (lcd.GPIO_KEY3_PIN,      _back),
     ]
     prev      = [pin.value for pin, _ in handlers]
     last_fire = [0.0] * len(handlers)
