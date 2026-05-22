@@ -69,7 +69,7 @@ class LCD(config.RaspberryPi):
         else:
             self.width = LCD_WIDTH; self.height = LCD_HEIGHT
             mem = {U2D_L2R: 0x20, U2D_R2L: 0x60, D2U_L2R: 0xA0, D2U_R2L: 0xE0}[Scan_dir]
-        if (mem & 0x10) != 1:
+        if (mem & 0x10) != 0:
             self.LCD_X_Adjust = LCD_Y; self.LCD_Y_Adjust = LCD_X
         else:
             self.LCD_X_Adjust = LCD_X; self.LCD_Y_Adjust = LCD_Y
@@ -107,7 +107,7 @@ class LCD(config.RaspberryPi):
         for i in range(0, len(buf), 4096):
             self.spi_writebyte(buf[i:i+4096])
 
-    def LCD_ShowImage(self, Image, Xstart=0, Ystart=0):
+    def LCD_ShowImage(self, Image):
         if Image is None:
             return
         img = np.asarray(Image)
