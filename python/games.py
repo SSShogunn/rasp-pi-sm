@@ -1,11 +1,12 @@
 import time, random, threading
+from typing import Any, Callable
 import state
-from constants import W, H, F_VAL, F_LABEL, F_FOOT, T_PRI, T_DIM, C_HOT, C_OK, GAME_LIST
+from constants import W, H, F_VAL, F_LABEL, F_FOOT, T_PRI, T_DIM, C_HOT
 from PIL import Image, ImageDraw
 
-_lock_ref  = None
-_lcd_ref   = None
-_render_fn = None
+_lock_ref:  Any                       = None
+_lcd_ref:   Any                       = None
+_render_fn: Callable[[], None] | None = None
 
 def init(lcd, lock, render_fn):
     global _lcd_ref, _lock_ref, _render_fn
@@ -44,7 +45,7 @@ def _game_snake():
             elif lcd.GPIO_KEY_DOWN_PIN.value  and direc != (0, -1): pend = (0,  1); last_inp = now
             elif lcd.GPIO_KEY_LEFT_PIN.value  and direc != (1,  0): pend = (-1, 0); last_inp = now
             elif lcd.GPIO_KEY_RIGHT_PIN.value and direc != (-1, 0): pend = (1,  0); last_inp = now
-        if lcd.GPIO_KEY2_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value: break
 
         if now - last_step >= step:
             direc = pend
@@ -77,7 +78,7 @@ def _game_snake():
     d.text(((W - tw(f"Score: {score}", F_LABEL)) // 2, 66), f"Score: {score}", font=F_LABEL, fill=T_PRI)
     d.text(((W - tw("KEY2 to exit", F_FOOT)) // 2, 86), "KEY2 to exit", font=F_FOOT, fill=T_DIM)
     _show(img)
-    while state.running and not _lcd_ref.GPIO_KEY2_PIN.value:
+    while state.running and not _lcd_ref.GPIO_KEY3_PIN.value:
         time.sleep(0.1)
     time.sleep(0.3)
     state.game_active = False
@@ -98,7 +99,7 @@ def _game_pong():
         t0 = time.time()
         if lcd.GPIO_KEY_UP_PIN.value:   pl_y = max(0, pl_y - PL_SPD)
         if lcd.GPIO_KEY_DOWN_PIN.value: pl_y = min(H - PAD_H, pl_y + PL_SPD)
-        if lcd.GPIO_KEY2_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value: break
 
         ball[0] += bvx; ball[1] += bvy
         if ball[1] <= 0:       ball[1] = 0;      bvy = abs(bvy)
@@ -150,7 +151,7 @@ def _game_flappy():
         k3_now = lcd.GPIO_KEY3_PIN.value
         flap   = (up_now and not prev_up) or (pr_now and not prev_pr) or (k3_now and not prev_k3)
         prev_up = up_now; prev_pr = pr_now; prev_k3 = k3_now
-        if lcd.GPIO_KEY2_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value: break
 
         if flap: bird_v = FLAP
         bird_v += GRAVITY; bird_y += bird_v

@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard
-Pages: Home · System · Network · Services · Pi-hole · Sensor · Games · Settings
+Pages: Home · System · Network · Services · Pi-hole · Games · Settings
 Keys:  Up/Down    = navigate menus
        Left/Right = change pages / adjust values
-       KEY1 = power  KEY2 = settings  KEY3 = refresh  PRESS = confirm / toggle
+       KEY1 = power  KEY2 = home  KEY3 = back  PRESS = confirm / toggle
 Run:   cd python && sudo python3 monitor.py
-Deps:  sudo apt install python3-pil python3-numpy python3-gpiozero python3-spidev
-       sudo pip3 install bleak psutil --break-system-packages
 """
 
-import time, signal, threading, subprocess, logging
+import time, signal, threading, logging
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,11 +22,6 @@ import state
 import settings_mgr
 settings_mgr.load()
 
-# ── boot bluetooth ────────────────────────────────────────────────────────────
-subprocess.run(["rfkill",    "unblock", "bluetooth"], capture_output=True)
-time.sleep(1)
-subprocess.run(["hciconfig", "hci0",   "up"],        capture_output=True)
-
 # ── imports that depend on state being ready ──────────────────────────────────
 import fetch, draw, games, input_handler
 from draw import render
@@ -37,14 +30,10 @@ from constants import SLEEP_PRESETS
 # ── wire up cross-module references ──────────────────────────────────────────
 games.init(state.lcd, state._lock, render)
 
-# ── initial data fetch ────────────────────────────────────────────────────────
-log.info("Fetching initial data...")
-fetch.fetch_weather()
+# ── show display immediately with fast local data, fetch slow sources in bg ───
+log.info("Starting dashboard...")
 fetch.fetch_system()
 fetch.fetch_network()
-fetch.fetch_services()
-fetch.fetch_pihole()
-
 with state._lock:
     state.lcd.bl_DutyCycle(state.bl_pct)
 render()
