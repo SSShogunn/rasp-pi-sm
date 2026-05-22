@@ -1,6 +1,6 @@
-import threading, time, os
+import threading, time, os, subprocess
 import LCD_1in44
-from constants import SERVICES, SLEEP_PRESETS
+from constants import SERVICES
 
 def _get_rfkill(kind):
     try:
@@ -13,6 +13,14 @@ def _get_rfkill(kind):
         pass
     return True
 
+def _get_hotspot():
+    try:
+        r = subprocess.run(["iw", "dev", "wlan0", "info"],
+                           capture_output=True, text=True)
+        return "type AP" in r.stdout
+    except Exception:
+        return False
+
 # ── shared data dict ──────────────────────────────────────────────────────────
 data = dict(
     cpu="--", ram_used="--", ram_cache="--",
@@ -21,7 +29,7 @@ data = dict(
     wip="...", uip="...", tip="...",
     rssi="--", rx_speed="--", tx_speed="--",
     rx_total="--", tx_total="--",
-    last_login="...", updates="--",
+    load_avg="--",   updates="--",
     pho_total="--", pho_blocked="--", pho_pct="--",
     pho_gravity="--", pho_clients="--", pho_cached="--",
     pho_status="?", pho_last="--",
@@ -42,16 +50,18 @@ page            = 0
 bl_pct          = 60
 sleeping        = False
 last_activity   = time.time()
-set_sel         = 0
-set_app         = None
+set_sel:        int           = 0
+set_app:        int | None    = None
 wifi_on         = _get_rfkill("wlan")
 bt_on           = _get_rfkill("bluetooth")
+hotspot_on      = _get_hotspot()
 pho_password    = ""
 weather_api_key = ""
 weather_city    = ""
-sleep_idx       = 0
+sleep_idx:      int           = 0
 power_open      = False
 power_sel       = 0
+hints_open      = False
 game_sel        = 0
 game_active     = False
 running         = True

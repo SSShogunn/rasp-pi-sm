@@ -27,7 +27,7 @@ SERVICES      = [("pihole-FTL", "pihole-FTL"),
                  ("Tailscale",  "tailscaled"),
                  ("SSH",        "ssh")]
 GAME_LIST     = ["SNAKE", "PONG", "FLAPPY BIRD"]
-SET_APPS      = ["Brightness", "Sleep", "WiFi", "Bluetooth"]
+SET_APPS      = ["Brightness", "Sleep", "WiFi", "Bluetooth", "Hotspot"]
 W = H         = 128
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ SEP_C    = ( 32,  36,  52)
 C_WIFI   = (255, 205,  55)
 C_USB    = (  0, 215, 215)
 C_TS     = ( 90, 162, 255)
-SET_COLS  = [ACC_SET, (55, 100, 220), C_OK, (0, 185, 230)]
+SET_COLS  = [ACC_SET, (55, 100, 220), C_OK, (0, 185, 230), (255, 120, 30)]
 
 # ── fonts ─────────────────────────────────────────────────────────────────────
 def _font(name, size):
