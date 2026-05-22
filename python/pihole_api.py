@@ -1,6 +1,10 @@
 import json, time, urllib.request, logging
+from typing import TYPE_CHECKING
 import state
 from constants import PHO_HOST
+
+if TYPE_CHECKING:
+    import fetch
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +53,6 @@ def toggle(render_fn):
         state.data["pho_status"] = "enabled" if new_on else "disabled"
     except Exception as e:
         log.warning("Pi-hole toggle failed: %s", e)
-    import fetch
-    fetch.fetch_pihole()
+    import fetch as _fetch
+    _fetch.fetch_pihole()
     render_fn()

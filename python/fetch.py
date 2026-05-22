@@ -1,4 +1,4 @@
-import time, subprocess, os, json, socket, urllib.request, urllib.parse, urllib.error, logging
+import time, subprocess, os, json, socket, urllib.request, urllib.parse, logging
 import state, pihole_api
 from constants import (SERVICES, REFRESH, REFRESH_WTH, REFRESH_SVC, REFRESH_PHO,
                        WTH_URL, PAGE_HOME, PAGE_SYS, PAGE_NET, PAGE_SVC, PAGE_PHO)
@@ -216,22 +216,27 @@ def fetch_network():
     state._prev_net.update({"rx": rx, "tx": tx, "t": now})
 
 # ── services ──────────────────────────────────────────────────────────────────
+_last_apt   = 0.0
+_APT_SECS   = 600   # re-check apt every 10 minutes
+
 def fetch_services():
+    global _last_apt
     for label, svc in SERVICES:
         state.svc_statuses[label] = (_run(f"systemctl is-active {svc}") == "active")
-    login = _run("last -w 2>/dev/null | head -1")
-    if login and not login.startswith("wtmp") and login.strip():
-        parts = login.split()
-        user  = parts[0] if parts else "?"
-        host  = parts[2] if len(parts) > 2 else ""
-        state.data["last_login"] = f"{user} {host}"[:20]
-    else:
-        state.data["last_login"] = "no record"
     try:
-        n = int(_run("apt list --upgradable 2>/dev/null | grep -c '/'"))
-        state.data["updates"] = f"{n} pending" if n > 0 else "up to date"
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+            state.data["load_avg"] = f"{parts[0]} / {parts[1]}"
     except Exception:
-        state.data["updates"] = "--"
+        state.data["load_avg"] = "--"
+    now = time.time()
+    if now - _last_apt >= _APT_SECS:
+        try:
+            n = int(_run("apt list --upgradable 2>/dev/null | grep -c '/'"))
+            state.data["updates"] = f"{n} pending" if n > 0 else "up to date"
+        except Exception:
+            state.data["updates"] = "--"
+        _last_apt = now
 
 # ── weather ───────────────────────────────────────────────────────────────────
 def fetch_weather():
