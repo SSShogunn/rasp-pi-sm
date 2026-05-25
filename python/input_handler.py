@@ -140,6 +140,9 @@ def _toggle_hotspot():
                  "ifname", "wlan0", "con-name", "Hotspot",
                  "ssid", "Pi-Dash", "password", "raspberry"],
                 check=False)
+            # prevent hotspot from auto-connecting on reboot
+            subprocess.run(["nmcli", "con", "modify", "Hotspot",
+                            "connection.autoconnect", "no"], check=False)
         state.hotspot_on = True
         state.wifi_on    = False
     else:
