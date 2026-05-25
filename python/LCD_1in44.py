@@ -69,10 +69,8 @@ class LCD(config.RaspberryPi):
         else:
             self.width = LCD_WIDTH; self.height = LCD_HEIGHT
             mem = {U2D_L2R: 0x20, U2D_R2L: 0x60, D2U_L2R: 0xA0, D2U_R2L: 0xE0}[Scan_dir]
-        if (mem & 0x10) != 0:
-            self.LCD_X_Adjust = LCD_Y; self.LCD_Y_Adjust = LCD_X
-        else:
-            self.LCD_X_Adjust = LCD_X; self.LCD_Y_Adjust = LCD_Y
+        self.LCD_X_Adjust = LCD_Y
+        self.LCD_Y_Adjust = LCD_X
         self.LCD_WriteReg(0x36)
         self.LCD_WriteData_8bit(mem | 0x08)
 
