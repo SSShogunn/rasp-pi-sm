@@ -87,20 +87,21 @@ Create `python/settings.json` (gitignored):
 }
 ```
 
-### 4. Run manually
-
-```bash
-cd python
-sudo python3 monitor.py
-```
-
-### 5. Install as a systemd service (auto-start on boot)
+### 4. Install as a systemd service (auto-start on boot)
 
 ```bash
 sudo bash install-service.sh
 ```
 
 The script creates a `.venv` at the project root, installs all dependencies from `pyproject.toml`, writes the systemd unit, and enables it. No `--break-system-packages` needed.
+
+### 5. Run manually (optional)
+
+The service installer must be run first (step 4) to create the virtualenv. After that you can run the dashboard directly using the venv Python:
+
+```bash
+sudo .venv/bin/python3 python/monitor.py
+```
 
 Useful service commands:
 

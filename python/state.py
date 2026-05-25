@@ -15,9 +15,9 @@ def _get_rfkill(kind):
 
 def _get_hotspot():
     try:
-        r = subprocess.run(["iw", "dev", "wlan0", "info"],
-                           capture_output=True, text=True)
-        return "type AP" in r.stdout
+        r = subprocess.run(["nmcli", "-t", "-f", "NAME", "con", "show", "--active"],
+                           capture_output=True, text=True, check=False)
+        return "Hotspot" in r.stdout.splitlines()
     except Exception:
         return False
 

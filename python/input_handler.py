@@ -123,19 +123,28 @@ def _toggle_wifi():
     state.wifi_on = not state.wifi_on
     subprocess.run(["rfkill", "unblock" if state.wifi_on else "block", "wlan"], check=False)
     if state.wifi_on:
+        time.sleep(1)
         subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
     draw.render()
 
 def _toggle_hotspot():
     if not state.hotspot_on:
-        subprocess.run(
-            ["nmcli", "device", "wifi", "hotspot",
-             "ifname", "wlan0", "ssid", "Pi-Dash", "password", "raspberry"],
-            check=False)
+        # Re-use existing profile if it was created before; create it on first run
+        chk = subprocess.run(["nmcli", "con", "show", "Hotspot"],
+                              capture_output=True, check=False)
+        if chk.returncode == 0:
+            subprocess.run(["nmcli", "con", "up", "Hotspot"], check=False)
+        else:
+            subprocess.run(
+                ["nmcli", "device", "wifi", "hotspot",
+                 "ifname", "wlan0", "con-name", "Hotspot",
+                 "ssid", "Pi-Dash", "password", "raspberry"],
+                check=False)
         state.hotspot_on = True
         state.wifi_on    = False
     else:
         subprocess.run(["nmcli", "con", "down", "Hotspot"], check=False)
+        time.sleep(2)  # wait for AP→STA mode switch before reconnecting
         subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
         state.hotspot_on = False
         state.wifi_on    = state._get_rfkill("wlan")
