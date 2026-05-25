@@ -1,4 +1,4 @@
-import time, threading, subprocess
+import time, threading, subprocess, queue
 from PIL import Image, ImageDraw
 import state, settings_mgr, pihole_api, games
 import draw
@@ -186,9 +186,20 @@ def _press():
     subprocess.run(["reboot"] if state.power_sel == 0 else ["poweroff"])
 
 # ── button polling ────────────────────────────────────────────────────────────
-_DEBOUNCE = 0.15
+_DEBOUNCE  = 0.15
+_btn_queue = queue.Queue()
+
+def _btn_worker():
+    while state.running:
+        try:
+            handler = _btn_queue.get(timeout=0.5)
+            handler()
+        except queue.Empty:
+            pass
 
 def start_polling():
+    threading.Thread(target=_btn_worker, daemon=True).start()
+
     lcd = state.lcd
     handlers = [
         (lcd.GPIO_KEY_UP_PIN,    _up),
@@ -214,5 +225,5 @@ def start_polling():
             curr = pin.value
             if curr and not prev[i] and (now - last_fire[i]) >= _DEBOUNCE:
                 last_fire[i] = now
-                threading.Thread(target=handler, daemon=True).start()
+                _btn_queue.put(handler)
             prev[i] = curr

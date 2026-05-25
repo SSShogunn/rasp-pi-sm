@@ -99,7 +99,7 @@ class LCD(config.RaspberryPi):
         self.LCD_WriteReg(0x2C)
 
     def LCD_Clear(self):
-        buf = [0xff] * (self.width * self.height * 2)
+        buf = b'\xff' * (self.width * self.height * 2)
         self.LCD_SetWindows(0, 0, self.width, self.height)
         self.digital_write(self.GPIO_DC_PIN, True)
         for i in range(0, len(buf), 4096):
@@ -109,11 +109,11 @@ class LCD(config.RaspberryPi):
         if Image is None:
             return
         img = np.asarray(Image)
-        pix = np.zeros((self.width, self.height, 2), dtype=np.uint8)
+        pix = np.empty((self.width, self.height, 2), dtype=np.uint8)
         pix[..., [0]] = np.bitwise_and(img[..., [0]], 0xF8) | np.right_shift(img[..., [1]], 5)
         pix[..., [1]] = np.bitwise_and(np.left_shift(img[..., [1]], 3), 0xE0) | np.right_shift(img[..., [2]], 3)
-        pix = pix.flatten().tolist()
+        raw = pix.tobytes()
         self.LCD_SetWindows(0, 0, self.width, self.height)
         self.digital_write(self.GPIO_DC_PIN, True)
-        for i in range(0, len(pix), 4096):
-            self.spi_writebyte(pix[i:i+4096])
+        for i in range(0, len(raw), 4096):
+            self.spi_writebyte(raw[i:i+4096])
