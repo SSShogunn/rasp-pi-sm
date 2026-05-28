@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Pi Zero 2W Dashboard
-Pages: Home · System · Network · Services · Pi-hole · Games · Settings
+Pages: Home · System · Network · Pi-hole · Games · Settings
 Keys:  Up/Down    = navigate menus
        Left/Right = change pages / adjust values
        KEY1 = power  KEY2 = home  KEY3 = back  PRESS = confirm / toggle
@@ -22,6 +22,11 @@ import state
 import settings_mgr
 settings_mgr.load()
 
+# ── boot splash while the heavier modules import ──────────────────────────────
+import splash
+state.apply_backlight()
+splash.show(state.lcd)
+
 # ── imports that depend on state being ready ──────────────────────────────────
 import fetch, draw, games, input_handler
 from draw import render
@@ -32,8 +37,7 @@ games.init(state.lcd, state._lock, render)
 
 # ── light up immediately, all data fetched in background ─────────────────────
 log.info("Starting dashboard...")
-with state._lock:
-    state.lcd.bl_DutyCycle(state.bl_pct)
+state.apply_backlight()
 render()
 log.info("Dashboard running — Ctrl-C to quit")
 
@@ -58,8 +62,9 @@ try:
         sleep_secs = SLEEP_PRESETS[state.sleep_idx]
         if not state.sleeping and not state.game_active and sleep_secs > 0 and (now - state.last_activity) >= sleep_secs:
             state.sleeping = True
-            with state._lock:
-                state.lcd.bl_DutyCycle(0)
+        # one place owns the backlight: handles sleep + night auto-dim
+        if not state.game_active:
+            state.apply_backlight()
         time.sleep(0.1)
 finally:
     log.info("Shutting down...")

@@ -13,8 +13,7 @@ def _wake_if_sleeping():
     _touch()
     if state.sleeping:
         state.sleeping = False
-        with state._lock:
-            state.lcd.bl_DutyCycle(state.bl_pct)
+        state.apply_backlight()
         draw.render()
         return True
     return False
@@ -55,7 +54,7 @@ def _left():
     if state.page == PAGE_SET and state.set_app is not None:
         if state.set_app == 0:
             state.bl_pct = max(10, state.bl_pct - 10)
-            with state._lock: state.lcd.bl_DutyCycle(state.bl_pct)
+            state.apply_backlight()
             settings_mgr.save()
         elif state.set_app == 1:
             state.sleep_idx = max(0, state.sleep_idx - 1)
@@ -75,7 +74,7 @@ def _right():
     if state.page == PAGE_SET and state.set_app is not None:
         if state.set_app == 0:
             state.bl_pct = min(100, state.bl_pct + 10)
-            with state._lock: state.lcd.bl_DutyCycle(state.bl_pct)
+            state.apply_backlight()
             settings_mgr.save()
         elif state.set_app == 1:
             state.sleep_idx = min(len(SLEEP_PRESETS) - 1, state.sleep_idx + 1)
@@ -171,6 +170,11 @@ def _press():
             draw.render(); return
         elif state.set_app == 4:
             threading.Thread(target=_toggle_hotspot, daemon=True).start(); return
+        elif state.set_app == 5:
+            state.auto_dim = not state.auto_dim
+            settings_mgr.save()
+            state.apply_backlight()
+            draw.render(); return
     if not state.power_open:
         return
     msg = "REBOOTING..." if state.power_sel == 0 else "SHUTTING DOWN..."

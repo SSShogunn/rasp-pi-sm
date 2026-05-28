@@ -1,14 +1,13 @@
 from PIL import ImageFont
 
 # ── page IDs ──────────────────────────────────────────────────────────────────
-PAGES     = 7
+PAGES     = 6
 PAGE_HOME = 0
 PAGE_SYS  = 1
 PAGE_NET  = 2
-PAGE_SVC  = 3
-PAGE_PHO  = 4
-PAGE_GAMES= 5
-PAGE_SET  = 6
+PAGE_PHO  = 3
+PAGE_GAMES= 4
+PAGE_SET  = 5
 
 # ── hardware / API ────────────────────────────────────────────────────────────
 PHO_HOST      = "http://localhost"
@@ -17,17 +16,18 @@ WTH_URL       = "https://api.openweathermap.org/data/2.5/weather"
 # ── refresh intervals (seconds) ───────────────────────────────────────────────
 REFRESH       = 5
 REFRESH_WTH   = 900
-REFRESH_SVC   = 30
 REFRESH_PHO   = 10
+
+# ── auto-dim (night brightness cap) ───────────────────────────────────────────
+NIGHT_START   = 21    # 21:00
+NIGHT_END     = 7     # 07:00
+NIGHT_CAP     = 20    # max brightness % during night when auto-dim is on
 
 # ── UI config ─────────────────────────────────────────────────────────────────
 SLEEP_PRESETS = [10, 20, 30, 60, 120, 300, 0]
 SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
-SERVICES      = [("pihole-FTL", "pihole-FTL"),
-                 ("Tailscale",  "tailscaled"),
-                 ("SSH",        "ssh")]
 GAME_LIST     = ["SNAKE", "PONG", "FLAPPY", "BREAKOUT", "INVADERS"]
-SET_APPS      = ["Brightness", "Sleep", "WiFi", "Bluetooth", "Hotspot"]
+SET_APPS      = ["Brightness", "Sleep", "WiFi", "Bluetooth", "Hotspot", "Auto-Dim"]
 W = H         = 128
 
 # ── palette ───────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ SEP_C    = ( 32,  36,  52)
 C_WIFI   = (255, 205,  55)
 C_USB    = (  0, 215, 215)
 C_TS     = ( 90, 162, 255)
-SET_COLS  = [ACC_SET, (55, 100, 220), C_OK, (0, 185, 230), (255, 120, 30)]
+SET_COLS  = [ACC_SET, (55, 100, 220), C_OK, (0, 185, 230), (255, 120, 30), (255, 200, 0)]
 
 # ── fonts ─────────────────────────────────────────────────────────────────────
 def _font(name, size):

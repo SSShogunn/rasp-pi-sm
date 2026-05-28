@@ -16,6 +16,7 @@ def load():
         state.pho_password    = s.get("pho_password",    "")
         state.weather_api_key = s.get("weather_api_key", "")
         state.weather_city    = s.get("weather_city",    "")
+        state.auto_dim        = bool(s.get("auto_dim", True))
         hs = s.get("high_scores", {})
         for k in state.high_scores:
             state.high_scores[k] = int(hs.get(k, 0))
@@ -33,6 +34,7 @@ def save():
                 "pho_password":    state.pho_password,
                 "weather_api_key": state.weather_api_key,
                 "weather_city":    state.weather_city,
+                "auto_dim":        state.auto_dim,
                 "high_scores":     state.high_scores,
             }, f)
     except Exception as e:

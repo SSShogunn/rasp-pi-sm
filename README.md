@@ -8,13 +8,12 @@ A sleek, dark-themed system dashboard for the **Raspberry Pi Zero 2W** with the 
 
 | Page | What it shows |
 |---|---|
-| **Home** | Live clock, date, weather (OpenWeatherMap), uptime |
-| **System** | CPU %, RAM bar, Disk %, Temperature, CPU freq, total network I/O |
-| **Network** | WiFi/USB/Tailscale IPs, signal strength, live RX/TX speed |
-| **Services** | pihole-FTL, Tailscale, SSH status · load average · pending updates |
-| **Pi-hole** | Blocked queries, % blocked, gravity list size, last blocked domain, toggle |
-| **Games** | Snake · Pong · Flappy Bird |
-| **Settings** | Brightness, sleep timer, WiFi toggle, Bluetooth toggle, Hotspot toggle (scrollable) |
+| **Home** | Live clock, date, weather + condition icon (OpenWeatherMap), uptime, load avg |
+| **System** | CPU % + history graph, RAM % + history graph, Disk %, Temperature, CPU freq |
+| **Network** | SSID, signal bars, WiFi/USB/Tailscale IPs, live RX/TX speed graphs |
+| **Pi-hole** | Blocked queries, % blocked, gravity list size, last blocked domain |
+| **Games** | Snake · Pong · Flappy · Breakout · Space Invaders (with high scores) |
+| **Settings** | Brightness, sleep timer, WiFi, Bluetooth, Hotspot, Auto-Dim toggles (scrollable) |
 
 **Power menu** (KEY1): Reboot / Power Off with confirmation.
 
@@ -127,8 +126,9 @@ rasp-pi-sm/
     fetch.py            <- system / network / weather / Pi-hole fetchers + bg thread
     pihole_api.py       <- Pi-hole v6 REST API (session auth)
     draw.py             <- all page draw functions + render()
-    games.py            <- Snake, Pong, Flappy Bird
+    games.py            <- Snake, Pong, Flappy, Breakout, Space Invaders
     input_handler.py    <- button polling + all action handlers
+    splash.py           <- boot splash screen
     config.py           <- hardware GPIO pin map (Waveshare HAT)
     lcd_off.py          <- blanks screen on boot delay / service stop
     LCD_1in44.py        <- ST7735S display driver

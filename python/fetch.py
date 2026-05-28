@@ -1,8 +1,8 @@
 import time, subprocess, os, json, io, socket, urllib.request, urllib.parse, logging
 from PIL import Image as _PILImage
 import state, pihole_api
-from constants import (SERVICES, REFRESH, REFRESH_WTH, REFRESH_SVC, REFRESH_PHO,
-                       WTH_URL, PAGE_HOME, PAGE_SYS, PAGE_NET, PAGE_SVC, PAGE_PHO)
+from constants import (REFRESH, REFRESH_WTH, REFRESH_PHO,
+                       WTH_URL, PAGE_HOME, PAGE_SYS, PAGE_NET, PAGE_PHO)
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,20 @@ def fetch_system():
         _sys_psutil()
     else:
         _sys_proc()
+
+    # load average (was on the old Services page; Home + System use it now)
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+            state.data["load_avg"] = f"{parts[0]} / {parts[1]}"
+    except Exception:
+        state.data["load_avg"] = "--"
+
+    # push into rolling history for sparklines
+    try:    state.cpu_hist.append(int(state.data["cpu"]))
+    except (ValueError, TypeError): pass
+    try:    state.ram_hist.append(int(state.data["ram_used"]))
+    except (ValueError, TypeError): pass
 
 def _sys_psutil():
     try:
@@ -194,7 +208,8 @@ def fetch_network():
         state.data["wip"] = (_run("ip -4 addr show wlan0 2>/dev/null | grep inet | awk '{print $2}' | cut -d'/' -f1") or "N/A")
         state.data["uip"] = (_run("ip -4 addr show usb0  2>/dev/null | grep inet | awk '{print $2}' | cut -d'/' -f1") or "N/A")
 
-    state.data["tip"] = _run("tailscale ip -4 2>/dev/null") or "N/A"
+    state.data["tip"]  = _run("tailscale ip -4 2>/dev/null") or "N/A"
+    state.data["ssid"] = _run("iwgetid -r 2>/dev/null") or "--"
 
     try:
         with open("/proc/net/wireless") as f:
@@ -210,34 +225,15 @@ def fetch_network():
     now = time.time()
     dt  = now - state._prev_net["t"]
     if state._prev_net["t"] > 0 and dt > 0:
-        state.data["rx_speed"] = _fmt_rate((rx - state._prev_net["rx"]) / dt)
-        state.data["tx_speed"] = _fmt_rate((tx - state._prev_net["tx"]) / dt)
+        rx_rate = (rx - state._prev_net["rx"]) / dt
+        tx_rate = (tx - state._prev_net["tx"]) / dt
+        state.data["rx_speed"] = _fmt_rate(rx_rate)
+        state.data["tx_speed"] = _fmt_rate(tx_rate)
+        state.rx_hist.append(max(0.0, rx_rate))
+        state.tx_hist.append(max(0.0, tx_rate))
     state.data["rx_total"] = _fmt_bytes(rx)
     state.data["tx_total"] = _fmt_bytes(tx)
     state._prev_net.update({"rx": rx, "tx": tx, "t": now})
-
-# ── services ──────────────────────────────────────────────────────────────────
-_last_apt   = 0.0
-_APT_SECS   = 600   # re-check apt every 10 minutes
-
-def fetch_services():
-    global _last_apt
-    for label, svc in SERVICES:
-        state.svc_statuses[label] = (_run(f"systemctl is-active {svc}") == "active")
-    try:
-        with open("/proc/loadavg") as f:
-            parts = f.read().split()
-            state.data["load_avg"] = f"{parts[0]} / {parts[1]}"
-    except Exception:
-        state.data["load_avg"] = "--"
-    now = time.time()
-    if now - _last_apt >= _APT_SECS:
-        try:
-            n = int(_run("apt list --upgradable 2>/dev/null | grep -c '/'"))
-            state.data["updates"] = f"{n} pending" if n > 0 else "up to date"
-        except Exception:
-            state.data["updates"] = "--"
-        _last_apt = now
 
 # ── weather ───────────────────────────────────────────────────────────────────
 _icon_cache: str | None = None   # last downloaded icon code
@@ -314,18 +310,18 @@ def fetch_pihole():
         state.data["pho_last"] = "--"
 
 # ── background fetch thread ───────────────────────────────────────────────────
+#   index:        0              1            2             3
+_FNS = [fetch_weather, fetch_system, fetch_network, fetch_pihole]
+_IVS = [REFRESH_WTH,   REFRESH,      REFRESH,       REFRESH_PHO]
 _PAGE_FETCH_MAP = {
-    PAGE_HOME:  0,   # fetch_weather
-    PAGE_SYS:   1,   # fetch_system
-    PAGE_NET:   2,   # fetch_network
-    PAGE_SVC:   3,   # fetch_services
-    PAGE_PHO:   4,   # fetch_pihole
+    PAGE_HOME: 0,   # fetch_weather
+    PAGE_SYS:  1,   # fetch_system
+    PAGE_NET:  2,   # fetch_network
+    PAGE_PHO:  3,   # fetch_pihole
 }
 
 def run_bg(render_fn):
-    last       = [0.0] * 5
-    ivs        = [REFRESH_WTH, REFRESH, REFRESH, REFRESH_SVC, REFRESH_PHO]
-    fns        = [fetch_weather, fetch_system, fetch_network, fetch_services, fetch_pihole]
+    last       = [0.0] * len(_FNS)
     last_clock = 0.0
 
     while state.running:
@@ -334,7 +330,7 @@ def run_bg(render_fn):
 
         if not state.game_active:
             fetched_for_page = False
-            for i, (fn, iv) in enumerate(zip(fns, ivs)):
+            for i, (fn, iv) in enumerate(zip(_FNS, _IVS)):
                 if now - last[i] >= iv:
                     fn(); last[i] = time.time()
                     if _PAGE_FETCH_MAP.get(cur) == i:
@@ -349,8 +345,8 @@ def run_bg(render_fn):
         if state._fetch_now.is_set():
             state._fetch_now.clear()
             if not state.game_active:
-                p = state.page
-                if p < len(fns):
-                    fns[p](); last[p] = time.time()
+                idx = _PAGE_FETCH_MAP.get(state.page)
+                if idx is not None:
+                    _FNS[idx](); last[idx] = time.time()
                 if not state.sleeping and not state.power_open:
                     render_fn()

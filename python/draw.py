@@ -26,6 +26,35 @@ def _bar_row(d, y, label, val_str, pct, bar_color):
     d.text((W - _tw(d, val_str, F_VAL) - 4, y), val_str, font=F_VAL, fill=T_PRI)
     _bar(d, 4, y + 12, W - 8, 4, pct, bar_color)
 
+def _spark(d, x, y, w, h, hist, color, vmax=None):
+    """Draw a filled sparkline of `hist` (iterable of numbers) in a w×h box."""
+    d.rectangle([x, y, x + w - 1, y + h - 1], fill=TRACK)
+    vals = list(hist)
+    if not vals:
+        return
+    top = vmax if vmax is not None else max(vals)
+    if top <= 0:
+        return
+    n = len(vals)
+    # right-align: newest sample at the right edge
+    for i, v in enumerate(vals):
+        bh = max(0, min(h - 1, int((v / top) * (h - 1))))
+        px = x + w - n + i
+        if px < x:
+            continue
+        d.line([(px, y + h - 1), (px, y + h - 1 - bh)], fill=color)
+
+def _signal_bars(d, x, y, quality):
+    """4 ascending bars representing wifi quality 0..100."""
+    heights = [3, 5, 7, 9]
+    filled  = 0 if quality <= 0 else min(4, quality // 25 + 1)
+    bcol    = C_OK if quality >= 60 else (C_WARN if quality >= 30 else C_HOT)
+    for i, bh in enumerate(heights):
+        bx = x + i * 4
+        on = i < filled
+        d.rectangle([bx, y + 9 - bh, bx + 2, y + 9],
+                    fill=bcol if on else TRACK)
+
 def _header(d, title, accent, hdr_bg):
     d.rectangle([0, 0, W - 1, 15], fill=hdr_bg)
     d.rectangle([0, 0, 3, 15], fill=accent)
@@ -114,40 +143,35 @@ def draw_system():
     d   = ImageDraw.Draw(img)
     _header(d, "SYSTEM", ACC_SYS, HDR_SYS)
 
+    # CPU: label + value + history sparkline
     try:   avg = int(state.data["cpu"])
     except: avg = 0
-    _bar_row(d, 18, "CPU", f"{state.data['cpu']}%", avg, C_CPU)
+    d.text((4, 18), "CPU", font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, f"{state.data['cpu']}%", F_VAL) - 4, 18),
+           f"{state.data['cpu']}%", font=F_VAL, fill=T_PRI)
+    _spark(d, 4, 30, W - 8, 12, state.cpu_hist, C_CPU, vmax=100)
 
+    # RAM: label + value + history sparkline
     try:   ru = int(state.data["ram_used"])
     except: ru = 0
-    try:   rc = int(state.data["ram_cache"])
-    except: rc = 0
-    d.text((4, 38), "RAM", font=F_LABEL, fill=T_SEC)
-    d.text((W - _tw(d, f"{state.data['ram_used']}%", F_VAL) - 4, 38),
+    d.text((4, 46), "RAM", font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, f"{state.data['ram_used']}%", F_VAL) - 4, 46),
            f"{state.data['ram_used']}%", font=F_VAL, fill=T_PRI)
-    bw = W - 10
-    d.rectangle([4, 50, 4 + bw - 1, 53], fill=TRACK)
-    fu = max(0, int((bw - 2) * ru / 100))
-    fc = max(0, int((bw - 2) * rc / 100))
-    if fu > 0: d.rectangle([5, 51, 5 + fu - 1, 52], fill=C_RAM)
-    if fc > 0: d.rectangle([5 + fu, 51, 5 + fu + fc - 1, 52], fill=(70, 40, 120))
+    _spark(d, 4, 58, W - 8, 12, state.ram_hist, C_RAM, vmax=100)
 
+    # DISK bar
     try:   dp = int(state.data["disk"])
     except: dp = 0
-    _bar_row(d, 58, "DISK", f"{state.data['disk']}%", dp, C_DISK)
+    _bar_row(d, 74, "DISK", f"{state.data['disk']}%", dp, C_DISK)
 
+    # TEMP + freq
     try:   t = float(state.data["temp"])
     except: t = 0.0
     tc = C_HOT if t >= 70 else (C_WARN if t >= 55 else C_OK)
-    d.text((4,  76), "TEMP", font=F_LABEL, fill=T_SEC)
-    d.text((30, 76), f"{state.data['temp']}C", font=F_VAL, fill=tc)
-    d.text((W - _tw(d, state.data["cpu_freq"], F_LABEL) - 4, 76),
+    d.text((4,  92), "TEMP", font=F_LABEL, fill=T_SEC)
+    d.text((30, 92), f"{state.data['temp']}C", font=F_VAL, fill=tc)
+    d.text((W - _tw(d, state.data["cpu_freq"], F_LABEL) - 4, 92),
            state.data["cpu_freq"], font=F_LABEL, fill=T_DIM)
-
-    rx_s = f"IN  {state.data['rx_total']}"
-    tx_s = f"OUT {state.data['tx_total']}"
-    d.text((4,  90), rx_s, font=F_FOOT, fill=C_USB)
-    d.text((W - _tw(d, tx_s, F_FOOT) - 4, 90), tx_s, font=F_FOOT, fill=C_WIFI)
 
     _footer(d)
     return img
@@ -158,65 +182,53 @@ def draw_network():
     d   = ImageDraw.Draw(img)
     _header(d, "NETWORK", ACC_NET, HDR_NET)
 
-    y = 18
-    d.text((4, y), "WIFI", font=F_LABEL, fill=T_DIM)
-    if state.data["rssi"] != "--":
-        rs = f"{state.data['rssi']}dBm"
-        d.text((W - _tw(d, rs, F_LABEL) - 4, y), rs, font=F_LABEL, fill=C_WIFI)
-    y += 11
     try:
         quality = max(0, min(100, 2 * (int(state.data["rssi"]) + 100)))
-        bcol = C_OK if quality >= 60 else (C_WARN if quality >= 30 else C_HOT)
     except Exception:
-        quality, bcol = 0, TRACK
-    _bar(d, 4, y, W - 8, 3, quality, bcol)
-    y += 6
+        quality = 0
+
+    # WIFI row: label · dBm · signal bars
+    y = 18
+    d.text((4, y), "WIFI", font=F_LABEL, fill=T_DIM)
+    _signal_bars(d, W - 20, y, quality)
+    if state.data["rssi"] != "--":
+        rs = f"{state.data['rssi']}dBm"
+        d.text((W - 24 - _tw(d, rs, F_FOOT), y + 2), rs, font=F_FOOT, fill=T_SEC)
+
+    # SSID
+    y += 11
+    ssid = state.data["ssid"]
+    if ssid and ssid != "--":
+        s = ssid
+        while s and _tw(d, s, F_LABEL) > W - 8:
+            s = s[:-1]
+        d.text((4, y), s, font=F_LABEL, fill=C_WIFI)
+    else:
+        d.text((4, y), "not connected", font=F_LABEL, fill=T_DIM)
+
+    # wlan IP
+    y += 11
     d.text((4, y), state.data["wip"], font=F_IP, fill=C_WIFI)
-    y += 13; _sep(d, y); y += 5
+    y += 12; _sep(d, y); y += 4
 
-    d.text((4, y), "USB", font=F_LABEL, fill=T_DIM)
-    d.text((W - _tw(d, state.data["uip"], F_IP) - 4, y), state.data["uip"], font=F_IP, fill=C_USB)
-    y += 12; _sep(d, y); y += 5
+    # USB + Tailscale on compact rows
+    d.text((4, y), "USB", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, state.data["uip"], F_IP) - 4, y - 1), state.data["uip"], font=F_IP, fill=C_USB)
+    y += 11
+    d.text((4, y), "TS", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, state.data["tip"], F_IP) - 4, y - 1), state.data["tip"], font=F_IP, fill=C_TS)
+    y += 12; _sep(d, y); y += 4
 
-    d.text((4, y), "TS", font=F_LABEL, fill=T_DIM)
-    d.text((W - _tw(d, state.data["tip"], F_IP) - 4, y), state.data["tip"], font=F_IP, fill=C_TS)
-    y += 12; _sep(d, y); y += 5
-
+    # live throughput: speeds + dual sparkline
     rx_s = state.data["rx_speed"] if state.data["rx_speed"] != "--" else "..."
     tx_s = state.data["tx_speed"] if state.data["tx_speed"] != "--" else "..."
     d.text((4, y), f"RX {rx_s}", font=F_FOOT, fill=C_USB)
     d.text((W - _tw(d, f"TX {tx_s}", F_FOOT) - 4, y), f"TX {tx_s}", font=F_FOOT, fill=C_WIFI)
+    y += 11
+    half = (W - 10) // 2
+    _spark(d, 4,          y, half, 11, state.rx_hist, C_USB)
+    _spark(d, 6 + half,   y, half, 11, state.tx_hist, C_WIFI)
 
-    _footer(d)
-    return img
-
-# ── services ──────────────────────────────────────────────────────────────────
-def draw_services():
-    img = Image.new("RGB", (W, H), BG)
-    d   = ImageDraw.Draw(img)
-    _header(d, "SERVICES", ACC_SVC, HDR_SVC)
-
-    y = 18
-    for label, _ in SERVICES:
-        active  = state.svc_statuses.get(label, False)
-        dot_col = C_OK if active else C_HOT
-        status  = "ACTIVE" if active else "STOPPED"
-        d.rectangle([4, y + 2, 8, y + 6], fill=dot_col)
-        d.text((12, y), label, font=F_LABEL, fill=T_PRI)
-        d.text((W - _tw(d, status, F_LABEL) - 4, y), status, font=F_LABEL, fill=dot_col)
-        y += 14; _sep(d, y); y += 5
-
-    d.text((4, y), "LOAD", font=F_LABEL, fill=T_DIM)
-    d.text((W - _tw(d, state.data["load_avg"], F_LABEL) - 4, y),
-           state.data["load_avg"], font=F_LABEL, fill=T_SEC)
-    y += 13; _sep(d, y); y += 5
-
-    upd     = state.data["updates"]
-    upd_col = C_WARN if "pending" in upd else (C_OK if "up to date" in upd else T_SEC)
-    d.text((4, y), "UPDATES", font=F_LABEL, fill=T_DIM)
-    d.text((W - _tw(d, upd, F_LABEL) - 4, y), upd, font=F_LABEL, fill=upd_col)
-
-    _footer(d)
     return img
 
 # ── pi-hole ───────────────────────────────────────────────────────────────────
@@ -304,7 +316,8 @@ def draw_set_hub():
     vals = [f"{state.bl_pct}%", SLEEP_LABELS[state.sleep_idx],
             "ON" if state.wifi_on else "OFF",
             "ON" if state.bt_on else "OFF",
-            "ON" if state.hotspot_on else "OFF"]
+            "ON" if state.hotspot_on else "OFF",
+            "ON" if state.auto_dim else "OFF"]
 
     n       = len(SET_APPS)
     visible = 4
@@ -418,12 +431,34 @@ def draw_set_hotspot():
     _footer(d)
     return img
 
+def draw_set_autodim():
+    img    = Image.new("RGB", (W, H), BG)
+    d      = ImageDraw.Draw(img)
+    AD_COL = (255, 200, 0)
+    d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
+    d.rectangle([0, 0, 3, 15], fill=AD_COL)
+    d.text((8, 3), "AUTO-DIM", font=F_HDR, fill=T_PRI)
+    dot_col = AD_COL if state.auto_dim else C_HOT
+    status  = "ON" if state.auto_dim else "OFF"
+    d.ellipse([14, 26, 28, 40], fill=dot_col)
+    d.text((35, 25), status, font=F_MED, fill=dot_col)
+    y = 50
+    d.text((4, y), f"Night {NIGHT_START:02d}:00-{NIGHT_END:02d}:00", font=F_LABEL, fill=T_SEC)
+    y += 13
+    d.text((4, y), f"Caps brightness {NIGHT_CAP}%", font=F_LABEL, fill=T_DIM)
+    y += 13
+    night = "now: NIGHT" if state.is_night() else "now: DAY"
+    d.text((4, y), night, font=F_LABEL, fill=AD_COL if state.is_night() else T_DIM)
+    _footer(d)
+    return img
+
 def draw_settings_page():
     if   state.set_app == 0: return draw_set_bright()
     elif state.set_app == 1: return draw_set_sleep()
     elif state.set_app == 2: return draw_set_wifi()
     elif state.set_app == 3: return draw_set_bt()
     elif state.set_app == 4: return draw_set_hotspot()
+    elif state.set_app == 5: return draw_set_autodim()
     else:                    return draw_set_hub()
 
 # ── power ─────────────────────────────────────────────────────────────────────
@@ -472,8 +507,8 @@ def draw_hints():
     row(y, "KEY2",    "home",    ACC_NET); y += 12
     row(y, "KEY3",    "back",    ACC_SYS); y += 12
     _sep(d, y); y += 4
-    row(y, "Pi-hole", "PRESS: toggle",  ACC_PHO); y += 12
-    row(y, "Games",   "PRESS: launch",  ACC_GAME)
+    row(y, "Games",   "PRESS: launch",  ACC_GAME); y += 12
+    row(y, "Settings", "PRESS: open",   ACC_SET)
 
     return img
 
@@ -484,7 +519,6 @@ def _build():
     elif state.page == PAGE_HOME:    return draw_home()
     elif state.page == PAGE_SYS:     return draw_system()
     elif state.page == PAGE_NET:     return draw_network()
-    elif state.page == PAGE_SVC:     return draw_services()
     elif state.page == PAGE_PHO:     return draw_pihole()
     elif state.page == PAGE_GAMES:   return draw_games()
     elif state.page == PAGE_SET:     return draw_settings_page()
