@@ -1,8 +1,10 @@
-import time, random, threading
+import time, random, threading, logging
 from typing import Any, Callable
 import state, settings_mgr
 from constants import W, H, F_VAL, F_LABEL, F_FOOT, T_PRI, T_DIM, C_HOT
 from PIL import Image, ImageDraw
+
+log = logging.getLogger(__name__)
 
 _lock_ref:  Any                       = None
 _lcd_ref:   Any                       = None
@@ -435,4 +437,11 @@ _GAME_FNS = [_game_snake, _game_pong, _game_flappy, _game_breakout, _game_invade
 
 def launch(idx):
     state.game_active = True
-    threading.Thread(target=_GAME_FNS[idx], daemon=True).start()
+    def _run():
+        try:
+            _GAME_FNS[idx]()
+        except Exception:
+            log.exception("Game %d crashed", idx)
+            state.game_active = False
+            if _render_fn: _render_fn()
+    threading.Thread(target=_run, daemon=True).start()

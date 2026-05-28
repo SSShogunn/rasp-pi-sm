@@ -190,10 +190,15 @@ _DEBOUNCE  = 0.15
 _btn_queue = queue.Queue()
 
 def _btn_worker():
+    import logging
+    log = logging.getLogger(__name__)
     while state.running:
         try:
             handler = _btn_queue.get(timeout=0.5)
-            handler()
+            try:
+                handler()
+            except Exception:
+                log.exception("Button handler %s crashed", handler.__name__)
         except queue.Empty:
             pass
 
