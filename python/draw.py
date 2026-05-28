@@ -234,7 +234,7 @@ def draw_pihole():
     return img
 
 # ── games hub ─────────────────────────────────────────────────────────────────
-_GAME_HS_KEYS = ["SNAKE", "PONG", "FLAPPY", "BREAKOUT"]
+_GAME_HS_KEYS = ["SNAKE", "PONG", "FLAPPY", "BREAKOUT", "INVADERS"]
 
 def draw_games():
     img = Image.new("RGB", (W, H), BG)

@@ -266,8 +266,172 @@ def _game_breakout():
         state.high_scores["BREAKOUT"]=score; settings_mgr.save()
     _game_over("BREAKOUT",score)
 
+# ── space invaders ────────────────────────────────────────────────────────────
+_INV_ECOLS = 6; _INV_EROWS = 3
+_INV_EW = 10;   _INV_EH = 7
+_INV_SLOT_W = 15; _INV_SLOT_H = 11
+_INV_GRID_X = (W - _INV_ECOLS * _INV_SLOT_W + (_INV_SLOT_W - _INV_EW)) // 2
+_INV_GRID_Y = 14
+_INV_E_COLS = [(220, 50, 220), (50, 220, 80), (220, 180, 0)]
+
+def _game_invaders():
+    lcd = _lcd_ref
+    alive  = [[True] * _INV_ECOLS for _ in range(_INV_EROWS)]
+    em_ox  = 0; em_oy = 0; em_dx = 1
+    move_iv = 0.45; last_move = time.time()
+    PW = 12; PH = 5; px = W // 2 - PW // 2; py = H - 14
+    pbul   = None
+    ebuls  = []
+    shields = [[8 + i * 38, 94, 3] for i in range(3)]   # [x, y, hp]
+    SHW = 18; SHH = 5
+    score  = 0; lives = 3; level = 1
+    FRAME  = 1.0 / 30
+    prev_up = prev_pr = False
+    last_eshot = time.time()
+
+    def _al():
+        return [(c, r) for r in range(_INV_EROWS) for c in range(_INV_ECOLS) if alive[r][c]]
+
+    def _exy(c, r):
+        return _INV_GRID_X + em_ox + c * _INV_SLOT_W, _INV_GRID_Y + em_oy + r * _INV_SLOT_H
+
+    def _draw_alien(d, x, y, row, fr):
+        col = _INV_E_COLS[row]
+        d.rectangle([x+2, y,   x+_INV_EW-3, y+_INV_EH-1], fill=col)
+        d.rectangle([x,   y+2, x+_INV_EW-1, y+_INV_EH-3], fill=col)
+        if fr:
+            d.rectangle([x,              y+_INV_EH-2, x+1,              y+_INV_EH-1], fill=col)
+            d.rectangle([x+_INV_EW-2,   y+_INV_EH-2, x+_INV_EW-1,      y+_INV_EH-1], fill=col)
+        else:
+            d.rectangle([x+2,            y+_INV_EH-2, x+3,              y+_INV_EH-1], fill=col)
+            d.rectangle([x+_INV_EW-4,   y+_INV_EH-2, x+_INV_EW-3,      y+_INV_EH-1], fill=col)
+
+    while state.running:
+        t0 = time.time()
+        if lcd.GPIO_KEY3_PIN.value: break
+
+        if lcd.GPIO_KEY_LEFT_PIN.value:  px = max(0, px - 3)
+        if lcd.GPIO_KEY_RIGHT_PIN.value: px = min(W - PW, px + 3)
+
+        up = lcd.GPIO_KEY_UP_PIN.value; pr = lcd.GPIO_KEY_PRESS_PIN.value
+        if (up and not prev_up) or (pr and not prev_pr):
+            if pbul is None: pbul = [px + PW // 2, py - 1]
+        prev_up = up; prev_pr = pr
+
+        if pbul:
+            pbul[1] -= 5
+            if pbul[1] < 0: pbul = None
+
+        for b in ebuls: b[1] += 2
+        ebuls[:] = [b for b in ebuls if b[1] < H]
+
+        # enemy march
+        al = _al()
+        if al and t0 - last_move >= move_iv:
+            min_c = min(c for c,r in al); max_c = max(c for c,r in al)
+            lx = _INV_GRID_X + em_ox + min_c * _INV_SLOT_W
+            rx = _INV_GRID_X + em_ox + max_c * _INV_SLOT_W + _INV_EW
+            step = 2
+            if (em_dx > 0 and rx + step > W - 1) or (em_dx < 0 and lx - step < 1):
+                em_dx = -em_dx; em_oy += _INV_SLOT_H
+            else:
+                em_ox += em_dx * step
+            last_move = t0
+
+        # enemy shoot
+        if al and t0 - last_eshot >= max(0.22, 1.6 - score * 0.001):
+            ec, er = random.choice(al)
+            ex, ey = _exy(ec, er)
+            ebuls.append([ex + _INV_EW // 2, ey + _INV_EH])
+            last_eshot = t0
+
+        # player bullet vs enemies
+        if pbul:
+            for r in range(_INV_EROWS):
+                for c in range(_INV_ECOLS):
+                    if not alive[r][c]: continue
+                    ex, ey = _exy(c, r)
+                    if ex <= pbul[0] <= ex + _INV_EW and ey <= pbul[1] <= ey + _INV_EH:
+                        alive[r][c] = False; pbul = None
+                        score += (_INV_EROWS - r) * 10
+                        n = len(_al()); total = _INV_EROWS * _INV_ECOLS
+                        move_iv = max(0.06, 0.45 * n / total)
+
+        # player bullet vs shields
+        if pbul:
+            for sh in shields:
+                if sh[2] > 0 and sh[0] <= pbul[0] <= sh[0]+SHW and sh[1] <= pbul[1] <= sh[1]+SHH:
+                    sh[2] -= 1; pbul = None; break
+
+        # collect bullet collisions without double-remove
+        dead_ebuls = set()
+        for i, b in enumerate(ebuls):
+            if px <= b[0] <= px + PW and py <= b[1] <= py + PH:
+                dead_ebuls.add(i); lives -= 1
+                if lives <= 0: break
+        for i, b in enumerate(ebuls):
+            if i in dead_ebuls: continue
+            for sh in shields:
+                if sh[2] > 0 and sh[0] <= b[0] <= sh[0]+SHW and sh[1] <= b[1] <= sh[1]+SHH:
+                    sh[2] -= 1; dead_ebuls.add(i); break
+        if dead_ebuls:
+            ebuls[:] = [b for i, b in enumerate(ebuls) if i not in dead_ebuls]
+
+        if lives <= 0: break
+
+        # wave cleared → next level
+        if not _al():
+            level += 1; score += 200
+            alive  = [[True] * _INV_ECOLS for _ in range(_INV_EROWS)]
+            em_ox  = 0; em_oy = 0; em_dx = 1
+            move_iv = max(0.06, 0.45 - (level - 1) * 0.05)
+
+        # enemies reached player
+        al = _al()
+        if al and any(_INV_GRID_Y + em_oy + r * _INV_SLOT_H + _INV_EH >= py for c, r in al):
+            break
+
+        # draw
+        img = Image.new("RGB", (W, H), (0, 0, 8))
+        d   = ImageDraw.Draw(img)
+        tw  = lambda t, f: int(d.textlength(t, font=f))
+        d.text((2, 2), f"SCR {score}", font=F_FOOT, fill=(160, 160, 200))
+        lv = f"LV{level}"
+        d.text(((W - tw(lv, F_FOOT)) // 2, 2), lv, font=F_FOOT, fill=(80, 80, 160))
+        d.text((W - tw(f"x{lives}", F_FOOT) - 2, 2), f"x{lives}", font=F_FOOT, fill=(0, 220, 255))
+        d.line([(0, py + PH + 2), (W - 1, py + PH + 2)], fill=(25, 25, 55))
+
+        for sh in shields:
+            if sh[2] > 0:
+                g = 60 + sh[2] * 46; shade = (0, g, g // 3)
+                d.rectangle([sh[0], sh[1], sh[0]+SHW-1, sh[1]+SHH-1], fill=shade)
+
+        fr = int(time.time() * 3) % 2
+        for r in range(_INV_EROWS):
+            for c in range(_INV_ECOLS):
+                if alive[r][c]:
+                    ex, ey = _exy(c, r)
+                    _draw_alien(d, ex, ey, r, fr)
+
+        # player ship
+        d.rectangle([px+3, py,   px+PW-4, py+PH-1], fill=(0, 220, 255))
+        d.rectangle([px,   py+2, px+PW-1, py+PH-1], fill=(0, 220, 255))
+        d.rectangle([px+5, py-2, px+6,    py-1],     fill=(0, 220, 255))
+
+        if pbul:
+            d.rectangle([pbul[0]-1, pbul[1], pbul[0], pbul[1]+4], fill=(0, 255, 150))
+        for b in ebuls:
+            d.rectangle([b[0]-1, b[1], b[0], b[1]+3], fill=(255, 80, 60))
+
+        _show(img)
+        time.sleep(max(0, FRAME - (time.time() - t0)))
+
+    if score > state.high_scores.get("INVADERS", 0):
+        state.high_scores["INVADERS"] = score; settings_mgr.save()
+    _game_over("INVADERS", score)
+
 # ── launcher ──────────────────────────────────────────────────────────────────
-_GAME_FNS = [_game_snake, _game_pong, _game_flappy, _game_breakout]
+_GAME_FNS = [_game_snake, _game_pong, _game_flappy, _game_breakout, _game_invaders]
 
 def launch(idx):
     state.game_active = True

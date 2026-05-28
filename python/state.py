@@ -65,5 +65,5 @@ hints_open      = False
 game_sel        = 0
 game_active     = False
 running         = True
-high_scores     = {"SNAKE": 0, "PONG": 0, "FLAPPY": 0, "BREAKOUT": 0}
+high_scores     = {"SNAKE": 0, "PONG": 0, "FLAPPY": 0, "BREAKOUT": 0, "INVADERS": 0}
 _fetch_now      = threading.Event()
