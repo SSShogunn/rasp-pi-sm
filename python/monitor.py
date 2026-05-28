@@ -30,10 +30,8 @@ from constants import SLEEP_PRESETS
 # ── wire up cross-module references ──────────────────────────────────────────
 games.init(state.lcd, state._lock, render)
 
-# ── show display immediately with fast local data, fetch slow sources in bg ───
+# ── light up immediately, all data fetched in background ─────────────────────
 log.info("Starting dashboard...")
-fetch.fetch_system()
-fetch.fetch_network()
 with state._lock:
     state.lcd.bl_DutyCycle(state.bl_pct)
 render()
@@ -43,6 +41,7 @@ log.info("Dashboard running — Ctrl-C to quit")
 _fetch_thread  = threading.Thread(target=fetch.run_bg,               args=(render,), daemon=True)
 _button_thread = threading.Thread(target=input_handler.start_polling,              daemon=True)
 _fetch_thread.start()
+state._fetch_now.set()   # kick off first fetch immediately
 _button_thread.start()
 
 # ── signal handler ────────────────────────────────────────────────────────────

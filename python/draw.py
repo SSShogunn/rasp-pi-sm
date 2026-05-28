@@ -51,38 +51,61 @@ def draw_home():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
 
-    pg = f"{state.page + 1}/{PAGES}"
-    d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
-
     now    = time.localtime()
     clk    = time.strftime("%H:%M", now)
     date_s = time.strftime("%a, %d %b %Y", now)
-    d.text(((W - _tw(d, clk, F_BIG)) // 2, 2), clk, font=F_BIG, fill=T_PRI)
-    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 32), date_s, font=F_LABEL, fill=T_DIM)
-    _sep(d, 44)
 
-    city_s = state.data["wth_city"] if state.data["wth_city"] != "--" else state.weather_city
-    temp_w = f"{state.data['wth_temp']}C"
-    d.text((4, 47), (city_s[:13] if city_s else "No city set"), font=F_LABEL, fill=T_SEC)
-    d.text((W - _tw(d, temp_w, F_VAL) - 4, 47), temp_w, font=F_VAL,
-           fill=_temp_color(state.data["wth_temp"], hot=35, warn=28))
+    # ── weather icon (top-right, 26×26) ──────────────────────────────────────
+    ICON_SIZE = 26
+    ICON_X    = W - ICON_SIZE - 1
+    if state.wth_icon_img is not None:
+        icon = state.wth_icon_img
+        img.paste(icon, (ICON_X, 1),
+                  mask=icon.getchannel("A") if icon.mode == "RGBA" else None)
+    else:
+        # placeholder circle when icon not yet loaded
+        d.ellipse([ICON_X + 4, 4, ICON_X + ICON_SIZE - 4, ICON_SIZE - 2], outline=T_DIM)
+        d.text((ICON_X + 8, 8), "?", font=F_FOOT, fill=T_DIM)
+
+    # ── clock (centered in space left of icon) ────────────────────────────────
+    avail_w = ICON_X - 2
+    d.text(((avail_w - _tw(d, clk, F_BIG)) // 2, 1), clk, font=F_BIG, fill=T_PRI)
+
+    # ── date ──────────────────────────────────────────────────────────────────
+    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 30), date_s, font=F_LABEL, fill=T_DIM)
+    _sep(d, 42)
+
+    # ── weather details ───────────────────────────────────────────────────────
+    city_s  = state.data["wth_city"] if state.data["wth_city"] != "--" else state.weather_city
+    temp_w  = f"{state.data['wth_temp']}°C"
+    tc      = _temp_color(state.data["wth_temp"], hot=35, warn=28)
+    d.text((4, 45), (city_s[:14] if city_s else "No city"), font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, temp_w, F_VAL) - 4, 45), temp_w, font=F_VAL, fill=tc)
 
     desc_s = state.data["wth_desc"]
-    if _tw(d, desc_s, F_LABEL) > W - 8:
-        while desc_s and _tw(d, desc_s + "…", F_LABEL) > W - 8:
+    max_w  = W - 8
+    if _tw(d, desc_s, F_LABEL) > max_w:
+        while desc_s and _tw(d, desc_s + "…", F_LABEL) > max_w:
             desc_s = desc_s[:-1]
         desc_s += "…"
-    d.text((4, 59), desc_s, font=F_LABEL, fill=T_DIM)
-    d.text((4, 70),
-           f"FL:{state.data['wth_feels']}C  W:{state.data['wth_wind']}m/s  H:{state.data['wth_humidity']}%",
+    d.text((4, 57), desc_s, font=F_LABEL, fill=T_DIM)
+    d.text((4, 68),
+           f"FL:{state.data['wth_feels']}°  "
+           f"W:{state.data['wth_wind']}m/s  "
+           f"H:{state.data['wth_humidity']}%",
            font=F_FOOT, fill=T_DIM)
 
-    _sep(d, 84)
-    d.text((4, 87), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-    d.text((W - _tw(d, clk, F_FOOT) - 4, 87), clk, font=F_FOOT, fill=T_DIM)
-    _sep(d, 99)
+    # ── system footer ─────────────────────────────────────────────────────────
+    _sep(d, 80)
+    d.text((4, 83), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, clk, F_FOOT) - 4, 83), clk, font=F_FOOT, fill=T_DIM)
+    _sep(d, 95)
+    d.text((4, 98), "LOAD", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, state.data["load_avg"], F_FOOT) - 4, 98),
+           state.data["load_avg"], font=F_FOOT, fill=T_SEC)
+    _sep(d, 110)
     hint = "▼ controls"
-    d.text(((W - _tw(d, hint, F_FOOT)) // 2, 103), hint, font=F_FOOT, fill=T_DIM)
+    d.text(((W - _tw(d, hint, F_FOOT)) // 2, 113), hint, font=F_FOOT, fill=T_DIM)
     return img
 
 # ── system ────────────────────────────────────────────────────────────────────

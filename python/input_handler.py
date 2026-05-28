@@ -1,6 +1,6 @@
 import time, threading, subprocess, queue
 from PIL import Image, ImageDraw
-import state, settings_mgr, pihole_api, games
+import state, settings_mgr, games
 import draw
 from constants import (PAGES, PAGE_HOME, PAGE_SET, PAGE_PHO, PAGE_GAMES,
                        SLEEP_PRESETS, GAME_LIST, SET_APPS, W, H, F_VAL, ACC_PWR)
@@ -62,6 +62,7 @@ def _left():
             settings_mgr.save()
         draw.render(); return
     state.page = (state.page - 1) % PAGES
+    state._fetch_now.set()
     draw.slide_render(-1)
 
 def _right():
@@ -81,6 +82,7 @@ def _right():
             settings_mgr.save()
         draw.render(); return
     state.page = (state.page + 1) % PAGES
+    state._fetch_now.set()
     draw.slide_render(1)
 
 def _home():
@@ -90,6 +92,7 @@ def _home():
     state.hints_open = False
     state.set_app    = None
     state.page       = PAGE_HOME
+    state._fetch_now.set()
     draw.render()
 
 def _back():
@@ -102,7 +105,9 @@ def _back():
     if state.set_app is not None:
         state.set_app = None; draw.render(); return
     if state.page != PAGE_HOME:
-        state.page = PAGE_HOME; draw.render()
+        state.page = PAGE_HOME
+        state._fetch_now.set()
+        draw.render()
 
 def _toggle_power():
     if _wake_if_sleeping(): return
@@ -112,9 +117,6 @@ def _toggle_power():
     state.power_open = not state.power_open
     state.power_sel  = 0
     draw.render()
-
-def _toggle_pihole():
-    pihole_api.toggle(draw.render)
 
 def _toggle_wifi():
     if state.hotspot_on:
@@ -129,7 +131,6 @@ def _toggle_wifi():
 
 def _toggle_hotspot():
     if not state.hotspot_on:
-        # Re-use existing profile if it was created before; create it on first run
         chk = subprocess.run(["nmcli", "con", "show", "Hotspot"],
                               capture_output=True, check=False)
         if chk.returncode == 0:
@@ -140,14 +141,13 @@ def _toggle_hotspot():
                  "ifname", "wlan0", "con-name", "Hotspot",
                  "ssid", "Pi-Dash", "password", "raspberry"],
                 check=False)
-            # prevent hotspot from auto-connecting on reboot
             subprocess.run(["nmcli", "con", "modify", "Hotspot",
                             "connection.autoconnect", "no"], check=False)
         state.hotspot_on = True
         state.wifi_on    = False
     else:
         subprocess.run(["nmcli", "con", "down", "Hotspot"], check=False)
-        time.sleep(2)  # wait for AP→STA mode switch before reconnecting
+        time.sleep(2)
         subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
         state.hotspot_on = False
         state.wifi_on    = state._get_rfkill("wlan")
@@ -158,8 +158,6 @@ def _press():
     _touch()
     if state.game_active: return
     if state.hints_open: return
-    if not state.power_open and state.page == PAGE_PHO:
-        threading.Thread(target=_toggle_pihole, daemon=True).start(); return
     if not state.power_open and state.page == PAGE_GAMES:
         games.launch(state.game_sel); return
     if not state.power_open and state.page == PAGE_SET:

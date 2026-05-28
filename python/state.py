@@ -35,7 +35,9 @@ data = dict(
     pho_status="?", pho_last="--",
     wth_temp="--", wth_feels="--", wth_humidity="--",
     wth_wind="--", wth_desc="--", wth_city="--",
+    wth_icon="--",
 )
+wth_icon_img = None   # PIL RGBA image downloaded from OWM, or None
 svc_statuses  = {label: False for label, _ in SERVICES}
 _prev_net     = {"rx": 0, "tx": 0, "t": 0.0}
 

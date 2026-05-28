@@ -1,4 +1,5 @@
-import time, subprocess, os, json, socket, urllib.request, urllib.parse, logging
+import time, subprocess, os, json, io, socket, urllib.request, urllib.parse, logging
+from PIL import Image as _PILImage
 import state, pihole_api
 from constants import (SERVICES, REFRESH, REFRESH_WTH, REFRESH_SVC, REFRESH_PHO,
                        WTH_URL, PAGE_HOME, PAGE_SYS, PAGE_NET, PAGE_SVC, PAGE_PHO)
@@ -239,6 +240,8 @@ def fetch_services():
         _last_apt = now
 
 # ── weather ───────────────────────────────────────────────────────────────────
+_icon_cache: str | None = None   # last downloaded icon code
+
 def fetch_weather():
     if not state.weather_api_key or not state.weather_city:
         return
@@ -254,8 +257,31 @@ def fetch_weather():
         state.data["wth_wind"]     = f"{j['wind']['speed']:.1f}"
         state.data["wth_desc"]     = j["weather"][0]["description"].title()
         state.data["wth_city"]     = j["name"]
+        state.data["wth_icon"]     = j["weather"][0]["icon"]
     except Exception as e:
         log.warning("Weather fetch failed: %s", e)
+        return
+
+    _fetch_weather_icon(state.data["wth_icon"])
+
+def _fetch_weather_icon(icon_code: str):
+    global _icon_cache
+    if icon_code == _icon_cache:
+        return
+    try:
+        url = f"https://openweathermap.org/img/wn/{icon_code}@2x.png"
+        with urllib.request.urlopen(url, timeout=8) as r:
+            raw = r.read()
+        img = _PILImage.open(io.BytesIO(raw)).convert("RGBA")
+        try:
+            resample = _PILImage.Resampling.LANCZOS
+        except AttributeError:
+            resample = _PILImage.LANCZOS
+        state.wth_icon_img = img.resize((26, 26), resample)
+        _icon_cache = icon_code
+        log.info("Weather icon %s fetched", icon_code)
+    except Exception as e:
+        log.warning("Weather icon fetch failed: %s", e)
 
 # ── pi-hole ───────────────────────────────────────────────────────────────────
 def fetch_pihole():
