@@ -349,15 +349,18 @@ def _game_invaders():
 
         # player bullet vs enemies
         if pbul:
+            hit = False
             for r in range(_INV_EROWS):
+                if hit: break
                 for c in range(_INV_ECOLS):
                     if not alive[r][c]: continue
                     ex, ey = _exy(c, r)
                     if ex <= pbul[0] <= ex + _INV_EW and ey <= pbul[1] <= ey + _INV_EH:
-                        alive[r][c] = False; pbul = None
+                        alive[r][c] = False; pbul = None; hit = True
                         score += (_INV_EROWS - r) * 10
                         n = len(_al()); total = _INV_EROWS * _INV_ECOLS
                         move_iv = max(0.06, 0.45 * n / total)
+                        break
 
         # player bullet vs shields
         if pbul:
