@@ -3,5 +3,8 @@ system_monitor
 main
 sample-files/
 python/settings.json
+__pycache__/
+*.pyc
+.venv/
 .claude/
 .vscode/
