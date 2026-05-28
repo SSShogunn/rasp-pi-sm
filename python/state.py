@@ -13,14 +13,6 @@ def _get_rfkill(kind):
         pass
     return True
 
-def _get_hotspot():
-    try:
-        r = subprocess.run(["nmcli", "-t", "-f", "NAME", "con", "show", "--active"],
-                           capture_output=True, text=True, check=False)
-        return "Hotspot" in r.stdout.splitlines()
-    except Exception:
-        return False
-
 # ── shared data dict ──────────────────────────────────────────────────────────
 data = dict(
     cpu="--", ram_used="--", ram_cache="--",
@@ -62,7 +54,6 @@ set_sel:        int           = 0
 set_app:        int | None    = None
 wifi_on         = _get_rfkill("wlan")
 bt_on           = _get_rfkill("bluetooth")
-hotspot_on      = _get_hotspot()
 pho_password    = ""
 weather_api_key = ""
 weather_city    = ""

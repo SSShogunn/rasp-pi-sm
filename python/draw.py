@@ -339,7 +339,6 @@ def draw_set_hub():
     vals = [f"{state.bl_pct}%", SLEEP_LABELS[state.sleep_idx],
             "ON" if state.wifi_on else "OFF",
             "ON" if state.bt_on else "OFF",
-            "ON" if state.hotspot_on else "OFF",
             "ON" if state.auto_dim else "OFF"]
 
     n       = len(SET_APPS)
@@ -433,26 +432,6 @@ def draw_set_bt():
     _footer(d)
     return img
 
-def draw_set_hotspot():
-    img    = Image.new("RGB", (W, H), BG)
-    d      = ImageDraw.Draw(img)
-    HS_COL = (255, 120, 30)
-    d.rectangle([0, 0, W - 1, 15], fill=HDR_SET)
-    d.rectangle([0, 0, 3, 15], fill=HS_COL)
-    d.text((8, 3), "HOTSPOT", font=F_HDR, fill=T_PRI)
-    dot_col = HS_COL if state.hotspot_on else C_HOT
-    status  = "ON" if state.hotspot_on else "OFF"
-    d.ellipse([14, 26, 28, 40], fill=dot_col)
-    d.text((35, 25), status, font=F_MED, fill=dot_col)
-    y = 50
-    if state.hotspot_on:
-        d.text((4, y), "SSID: Pi-Dash",  font=F_LABEL, fill=T_SEC); y += 13
-        d.text((4, y), "IP:   10.42.0.1", font=F_LABEL, fill=HS_COL)
-    else:
-        d.text((4, y), "Disables WiFi", font=F_LABEL, fill=T_DIM)
-    _footer(d)
-    return img
-
 def draw_set_autodim():
     img    = Image.new("RGB", (W, H), BG)
     d      = ImageDraw.Draw(img)
@@ -479,8 +458,7 @@ def draw_settings_page():
     elif state.set_app == 1: return draw_set_sleep()
     elif state.set_app == 2: return draw_set_wifi()
     elif state.set_app == 3: return draw_set_bt()
-    elif state.set_app == 4: return draw_set_hotspot()
-    elif state.set_app == 5: return draw_set_autodim()
+    elif state.set_app == 4: return draw_set_autodim()
     else:                    return draw_set_hub()
 
 # ── power ─────────────────────────────────────────────────────────────────────

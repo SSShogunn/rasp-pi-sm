@@ -13,7 +13,7 @@ A sleek, dark-themed system dashboard for the **Raspberry Pi Zero 2W** with the 
 | **Network** | SSID, signal bars, WiFi/USB/Tailscale IPs, live RX/TX speed graphs |
 | **Pi-hole** | Blocked queries, % blocked, gravity list size, last blocked domain |
 | **Games** | Snake · Pong · Flappy · Breakout · Space Invaders (with high scores) |
-| **Settings** | Brightness, sleep timer, WiFi, Bluetooth, Hotspot, Auto-Dim toggles (scrollable) |
+| **Settings** | Brightness, sleep timer, WiFi, Bluetooth, Auto-Dim toggles (scrollable) |
 
 **Power menu** (KEY1): Reboot / Power Off with confirmation.
 
@@ -39,8 +39,6 @@ KEY3                   →  Back (dismiss menus / return to previous level)
 ```
 
 Press **Down on the Home page** to open the Controls overlay with the full key reference.
-
-> **Note:** WiFi and Hotspot are mutually exclusive — enabling one automatically disables the other.
 
 ---
 

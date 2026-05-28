@@ -118,38 +118,11 @@ def _toggle_power():
     draw.render()
 
 def _toggle_wifi():
-    if state.hotspot_on:
-        subprocess.run(["nmcli", "con", "down", "Hotspot"], check=False)
-        state.hotspot_on = False
     state.wifi_on = not state.wifi_on
     subprocess.run(["rfkill", "unblock" if state.wifi_on else "block", "wlan"], check=False)
     if state.wifi_on:
         time.sleep(1)
         subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
-    draw.render()
-
-def _toggle_hotspot():
-    if not state.hotspot_on:
-        chk = subprocess.run(["nmcli", "con", "show", "Hotspot"],
-                              capture_output=True, check=False)
-        if chk.returncode == 0:
-            subprocess.run(["nmcli", "con", "up", "Hotspot"], check=False)
-        else:
-            subprocess.run(
-                ["nmcli", "device", "wifi", "hotspot",
-                 "ifname", "wlan0", "con-name", "Hotspot",
-                 "ssid", "Pi-Dash", "password", "raspberry"],
-                check=False)
-            subprocess.run(["nmcli", "con", "modify", "Hotspot",
-                            "connection.autoconnect", "no"], check=False)
-        state.hotspot_on = True
-        state.wifi_on    = False
-    else:
-        subprocess.run(["nmcli", "con", "down", "Hotspot"], check=False)
-        time.sleep(2)
-        subprocess.run(["nmcli", "device", "connect", "wlan0"], check=False)
-        state.hotspot_on = False
-        state.wifi_on    = state._get_rfkill("wlan")
     draw.render()
 
 def _press():
@@ -169,8 +142,6 @@ def _press():
             subprocess.run(["rfkill", "unblock" if state.bt_on else "block", "bluetooth"], check=False)
             draw.render(); return
         elif state.set_app == 4:
-            threading.Thread(target=_toggle_hotspot, daemon=True).start(); return
-        elif state.set_app == 5:
             state.auto_dim = not state.auto_dim
             settings_mgr.save()
             state.apply_backlight()
