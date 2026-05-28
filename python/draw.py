@@ -102,14 +102,14 @@ def draw_home():
 
     # ── date ──────────────────────────────────────────────────────────────────
     d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 30), date_s, font=F_LABEL, fill=T_DIM)
-    _sep(d, 42)
+    _sep(d, 43)
 
     # ── weather details ───────────────────────────────────────────────────────
     city_s  = state.data["wth_city"] if state.data["wth_city"] != "--" else state.weather_city
     temp_w  = f"{state.data['wth_temp']}°C"
     tc      = _temp_color(state.data["wth_temp"], hot=35, warn=28)
-    d.text((4, 45), (city_s[:14] if city_s else "No city"), font=F_LABEL, fill=T_SEC)
-    d.text((W - _tw(d, temp_w, F_VAL) - 4, 45), temp_w, font=F_VAL, fill=tc)
+    d.text((4, 47), (city_s[:14] if city_s else "No city"), font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, temp_w, F_VAL) - 4, 47), temp_w, font=F_VAL, fill=tc)
 
     desc_s = state.data["wth_desc"]
     max_w  = W - 8
@@ -117,24 +117,33 @@ def draw_home():
         while desc_s and _tw(d, desc_s + "…", F_LABEL) > max_w:
             desc_s = desc_s[:-1]
         desc_s += "…"
-    d.text((4, 57), desc_s, font=F_LABEL, fill=T_DIM)
-    d.text((4, 68),
+    d.text((4, 59), desc_s, font=F_LABEL, fill=T_DIM)
+    d.text((4, 71),
            f"FL:{state.data['wth_feels']}°  "
            f"W:{state.data['wth_wind']}m/s  "
            f"H:{state.data['wth_humidity']}%",
            font=F_FOOT, fill=T_DIM)
 
-    # ── system footer ─────────────────────────────────────────────────────────
-    _sep(d, 80)
-    d.text((4, 83), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-    d.text((W - _tw(d, clk, F_FOOT) - 4, 83), clk, font=F_FOOT, fill=T_DIM)
-    _sep(d, 95)
-    d.text((4, 98), "LOAD", font=F_FOOT, fill=T_DIM)
-    d.text((W - _tw(d, state.data["load_avg"], F_FOOT) - 4, 98),
+    # ── system glance row ───────────────────────────────────────────────────────
+    _sep(d, 84)
+    cpu_v  = f"{state.data['cpu']}%"
+    tmp_v  = f"{state.data['temp']}°"
+    ram_v  = f"{state.data['ram_used']}%"
+    sysc   = _temp_color(state.data["temp"], hot=70, warn=55)
+    d.text((4, 88),  "CPU", font=F_FOOT, fill=T_DIM)
+    d.text((24, 88), cpu_v, font=F_FOOT, fill=C_CPU)
+    d.text((W // 2 - 6, 88), tmp_v, font=F_FOOT, fill=sysc)
+    d.text((W - _tw(d, "RAM " + ram_v, F_FOOT) - 4, 88), "RAM", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, ram_v, F_FOOT) - 4, 88), ram_v, font=F_FOOT, fill=C_RAM)
+
+    # ── uptime + load ───────────────────────────────────────────────────────────
+    _sep(d, 100)
+    d.text((4, 103), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, state.data["load_avg"], F_FOOT) - 4, 103),
            state.data["load_avg"], font=F_FOOT, fill=T_SEC)
-    _sep(d, 110)
+    _sep(d, 115)
     hint = "▼ controls"
-    d.text(((W - _tw(d, hint, F_FOOT)) // 2, 113), hint, font=F_FOOT, fill=T_DIM)
+    d.text(((W - _tw(d, hint, F_FOOT)) // 2, 118), hint, font=F_FOOT, fill=T_DIM)
     return img
 
 # ── system ────────────────────────────────────────────────────────────────────
@@ -188,7 +197,7 @@ def draw_network():
         quality = 0
 
     # WIFI row: label · dBm · signal bars
-    y = 18
+    y = 19
     d.text((4, y), "WIFI", font=F_LABEL, fill=T_DIM)
     _signal_bars(d, W - 20, y, quality)
     if state.data["rssi"] != "--":
@@ -196,7 +205,7 @@ def draw_network():
         d.text((W - 24 - _tw(d, rs, F_FOOT), y + 2), rs, font=F_FOOT, fill=T_SEC)
 
     # SSID
-    y += 11
+    y += 12
     ssid = state.data["ssid"]
     if ssid and ssid != "--":
         s = ssid
@@ -207,27 +216,28 @@ def draw_network():
         d.text((4, y), "not connected", font=F_LABEL, fill=T_DIM)
 
     # wlan IP
-    y += 11
+    y += 12
     d.text((4, y), state.data["wip"], font=F_IP, fill=C_WIFI)
-    y += 12; _sep(d, y); y += 4
+    y += 14; _sep(d, y); y += 5
 
-    # USB + Tailscale on compact rows
+    # USB + Tailscale rows
     d.text((4, y), "USB", font=F_FOOT, fill=T_DIM)
     d.text((W - _tw(d, state.data["uip"], F_IP) - 4, y - 1), state.data["uip"], font=F_IP, fill=C_USB)
-    y += 11
+    y += 13
     d.text((4, y), "TS", font=F_FOOT, fill=T_DIM)
     d.text((W - _tw(d, state.data["tip"], F_IP) - 4, y - 1), state.data["tip"], font=F_IP, fill=C_TS)
-    y += 12; _sep(d, y); y += 4
+    y += 14; _sep(d, y); y += 5
 
-    # live throughput: speeds + dual sparkline
+    # live throughput: speeds + tall dual sparklines filling the rest
     rx_s = state.data["rx_speed"] if state.data["rx_speed"] != "--" else "..."
     tx_s = state.data["tx_speed"] if state.data["tx_speed"] != "--" else "..."
     d.text((4, y), f"RX {rx_s}", font=F_FOOT, fill=C_USB)
     d.text((W - _tw(d, f"TX {tx_s}", F_FOOT) - 4, y), f"TX {tx_s}", font=F_FOOT, fill=C_WIFI)
     y += 11
     half = (W - 10) // 2
-    _spark(d, 4,          y, half, 11, state.rx_hist, C_USB)
-    _spark(d, 6 + half,   y, half, 11, state.tx_hist, C_WIFI)
+    sh   = H - y - 2          # stretch to the bottom edge
+    _spark(d, 4,        y, half, sh, state.rx_hist, C_USB)
+    _spark(d, 6 + half, y, half, sh, state.tx_hist, C_WIFI)
 
     return img
 
@@ -242,30 +252,43 @@ def draw_pihole():
     else:                      acc = T_DIM
     _header(d, "PI-HOLE", acc, HDR_PHO)
 
+    # status dot in header
+    d.ellipse([W - 26, 5, W - 20, 11], fill=acc)
+
+    # ── block rate: big % + bar ─────────────────────────────────────────────────
     pct_s = f"{state.data['pho_pct']}%"
-    d.text((4,  18), "BLOCKED", font=F_LABEL, fill=T_SEC)
-    d.text((54, 18), state.data["pho_blocked"], font=F_VAL, fill=C_HOT)
-    d.text((W - _tw(d, pct_s, F_VAL) - 4, 18), pct_s, font=F_VAL, fill=C_WARN)
+    try:    pctf = float(state.data["pho_pct"])
+    except Exception: pctf = 0.0
+    d.text((4, 19), "BLOCK RATE", font=F_LABEL, fill=T_SEC)
+    d.text((W - _tw(d, pct_s, F_MED) - 4, 18), pct_s, font=F_MED, fill=C_WARN)
+    _bar(d, 4, 36, W - 8, 6, pctf, C_HOT)
+    _sep(d, 47)
 
-    d.text((4,  30), "QUERIES", font=F_LABEL, fill=T_SEC)
-    d.text((54, 30), state.data["pho_total"], font=F_VAL, fill=T_PRI)
+    # ── stat grid ───────────────────────────────────────────────────────────────
+    def stat(y, label, val, col):
+        d.text((4, y), label, font=F_LABEL, fill=T_DIM)
+        d.text((W - _tw(d, val, F_VAL) - 4, y), val, font=F_VAL, fill=col)
 
-    d.text((4,  42), "CACHED", font=F_LABEL, fill=T_SEC)
-    d.text((54, 42), state.data["pho_cached"], font=F_VAL, fill=C_CPU)
+    stat(52, "Queries", state.data["pho_total"],   T_PRI)
+    stat(66, "Blocked", state.data["pho_blocked"], C_HOT)
+    stat(80, "Cached",  state.data["pho_cached"],  C_CPU)
 
-    cl_s = f"CLNTS {state.data['pho_clients']}"
-    gv_s = f"GRV {state.data['pho_gravity']}"
-    d.text((4,  54), cl_s, font=F_LABEL, fill=T_DIM)
-    d.text((W - _tw(d, gv_s, F_LABEL) - 4, 54), gv_s, font=F_LABEL, fill=T_DIM)
-    _sep(d, 66)
+    cl_s = f"{state.data['pho_clients']}"
+    gv_s = f"{state.data['pho_gravity']}"
+    d.text((4, 94), "Clients", font=F_LABEL, fill=T_DIM)
+    d.text((44, 94), cl_s, font=F_VAL, fill=T_SEC)
+    d.text((W // 2 + 6, 94), "Gravity", font=F_LABEL, fill=T_DIM)
+    d.text((W - _tw(d, gv_s, F_VAL) - 4, 94), gv_s, font=F_VAL, fill=T_SEC)
+    _sep(d, 108)
 
-    d.text((4, 69), "LAST BLOCK", font=F_LABEL, fill=T_SEC)
+    # ── last blocked domain ──────────────────────────────────────────────────────
+    d.text((4, 112), "LAST", font=F_FOOT, fill=T_SEC)
     last = state.data["pho_last"]
-    while last and _tw(d, last + ("…" if len(last) < len(state.data["pho_last"]) else ""), F_LABEL) > W - 8:
+    full = last
+    while last and _tw(d, last + ("…" if len(last) < len(full) else ""), F_FOOT) > W - 34:
         last = last[:-1]
-    if len(last) < len(state.data["pho_last"]): last += "…"
-    d.text((4, 79), last, font=F_LABEL, fill=ACC_PHO)
-    _footer(d)
+    if len(last) < len(full): last += "…"
+    d.text((30, 112), last, font=F_FOOT, fill=ACC_PHO)
     return img
 
 # ── games hub ─────────────────────────────────────────────────────────────────
@@ -333,16 +356,15 @@ def draw_set_hub():
             d.rectangle([0, y, 3, y + 22], fill=col)
         d.rectangle([6, y + 6, 16, y + 16], fill=col if sel else T_DIM)
         d.text((20, y + 6), name, font=F_LABEL, fill=T_PRI if sel else T_SEC)
-        d.text((W - _tw(d, val, F_VAL) - 8, y + 6), val,
+        d.text((W - _tw(d, val, F_VAL) - 14, y + 6), val,
                font=F_VAL, fill=T_PRI if sel else T_DIM)
         y += 23
 
-    # scroll indicator (right edge dots)
-    if n > visible:
-        dot_h  = (visible * 23) // n
-        dot_y  = 18 + offset * (visible * 23) // n
-        d.rectangle([W - 3, 18, W - 1, 18 + visible * 23 - 1], fill=T_DIM)
-        d.rectangle([W - 3, dot_y, W - 1, dot_y + dot_h - 1], fill=ACC_SET)
+    # scroll arrows in the right gutter (only when there's more in that direction)
+    if offset > 0:
+        d.text((W - 9, 19),     "▲", font=F_FOOT, fill=ACC_SET)
+    if offset + visible < n:
+        d.text((W - 9, H - 11), "▼", font=F_FOOT, fill=ACC_SET)
 
     return img
 
