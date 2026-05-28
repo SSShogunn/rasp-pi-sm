@@ -201,132 +201,6 @@ def _game_flappy():
         settings_mgr.save()
     _game_over("FLAPPY", score)
 
-# ── tetris ────────────────────────────────────────────────────────────────────
-_T_CELL = 5
-_T_COLS = 10
-_T_ROWS = 20
-_T_BX   = 4
-_T_BY   = 8
-_T_BW   = _T_COLS * _T_CELL
-_T_BH   = _T_ROWS * _T_CELL
-
-_PIECES = [
-    [(0,1),(1,1),(2,1),(3,1)],
-    [(0,0),(1,0),(0,1),(1,1)],
-    [(1,0),(0,1),(1,1),(2,1)],
-    [(0,1),(1,1),(1,0),(2,0)],
-    [(0,0),(1,0),(1,1),(2,1)],
-    [(0,0),(0,1),(1,1),(2,1)],
-    [(2,0),(0,1),(1,1),(2,1)],
-]
-_PIECE_COLS = [
-    (0,220,220),(220,220,0),(160,0,220),
-    (0,220,0),(220,0,0),(0,80,220),(220,120,0),
-]
-
-def _t_rotate(piece):
-    my = max(y for x,y in piece)
-    return [(my-y, x) for x,y in piece]
-
-def _t_valid(board, piece, ox, oy):
-    for x,y in piece:
-        nx,ny = x+ox, y+oy
-        if nx<0 or nx>=_T_COLS or ny>=_T_ROWS: return False
-        if ny>=0 and board[ny][nx]: return False
-    return True
-
-def _game_tetris():
-    BG_T=(5,5,18); GRID_C=(20,22,40); BORDER=(40,44,70)
-    board = [[None]*_T_COLS for _ in range(_T_ROWS)]
-    lcd   = _lcd_ref
-    score=0; level=1; lines_total=0
-    FRAME=1.0/30
-
-    def _new():
-        idx=random.randrange(len(_PIECES))
-        return list(_PIECES[idx]), _PIECE_COLS[idx]
-
-    def _draw(cur, col, ox, oy, goy):
-        img=Image.new("RGB",(W,H),BG_T); d=ImageDraw.Draw(img)
-        d.rectangle([_T_BX-1,_T_BY-1,_T_BX+_T_BW,_T_BY+_T_BH],outline=BORDER)
-        for c in range(1,_T_COLS):
-            d.line([(_T_BX+c*_T_CELL,_T_BY),(_T_BX+c*_T_CELL,_T_BY+_T_BH-1)],fill=GRID_C)
-        for r in range(1,_T_ROWS):
-            d.line([(_T_BX,_T_BY+r*_T_CELL),(_T_BX+_T_BW-1,_T_BY+r*_T_CELL)],fill=GRID_C)
-        for r in range(_T_ROWS):
-            for c in range(_T_COLS):
-                if board[r][c]:
-                    px=_T_BX+c*_T_CELL; py=_T_BY+r*_T_CELL
-                    d.rectangle([px+1,py+1,px+_T_CELL-2,py+_T_CELL-2],fill=board[r][c])
-        gc=(col[0]//5,col[1]//5,col[2]//5)
-        for x,y in cur:
-            if y+goy>=0:
-                px=_T_BX+(x+ox)*_T_CELL; py=_T_BY+(y+goy)*_T_CELL
-                d.rectangle([px+1,py+1,px+_T_CELL-2,py+_T_CELL-2],outline=gc)
-        for x,y in cur:
-            if y+oy>=0:
-                px=_T_BX+(x+ox)*_T_CELL; py=_T_BY+(y+oy)*_T_CELL
-                d.rectangle([px+1,py+1,px+_T_CELL-2,py+_T_CELL-2],fill=col)
-        sx=_T_BX+_T_BW+5
-        d.text((sx,_T_BY),    "SCR",      font=F_FOOT,fill=(100,110,132))
-        d.text((sx,_T_BY+9),  str(score), font=F_FOOT,fill=(220,225,238))
-        d.text((sx,_T_BY+22), "LVL",      font=F_FOOT,fill=(100,110,132))
-        d.text((sx,_T_BY+31), str(level), font=F_FOOT,fill=(255,200,0))
-        d.text((sx,_T_BY+44), "LNS",      font=F_FOOT,fill=(100,110,132))
-        d.text((sx,_T_BY+53), str(lines_total),font=F_FOOT,fill=(0,215,105))
-        return img
-
-    piece,col=_new(); ox=_T_COLS//2-2; oy=-2
-    drop_iv=0.7; last_drop=last_inp=time.time()
-    prev_up=prev_lt=prev_rt=False
-
-    while state.running:
-        t0=time.time()
-        if lcd.GPIO_KEY3_PIN.value: break
-        goy=oy
-        while _t_valid(board,piece,ox,goy+1): goy+=1
-
-        if t0-last_inp>=0.1:
-            up=lcd.GPIO_KEY_UP_PIN.value
-            lt=lcd.GPIO_KEY_LEFT_PIN.value
-            rt=lcd.GPIO_KEY_RIGHT_PIN.value
-            dn=lcd.GPIO_KEY_DOWN_PIN.value
-            pr=lcd.GPIO_KEY_PRESS_PIN.value
-            if lt and not prev_lt and _t_valid(board,piece,ox-1,oy): ox-=1
-            if rt and not prev_rt and _t_valid(board,piece,ox+1,oy): ox+=1
-            drop_iv=0.05 if dn else max(0.1,0.7-(level-1)*0.05)
-            if up and not prev_up:
-                rot=_t_rotate(piece)
-                if   _t_valid(board,rot,ox,oy):  piece=rot
-                elif _t_valid(board,rot,ox+1,oy): piece=rot; ox+=1
-                elif _t_valid(board,rot,ox-1,oy): piece=rot; ox-=1
-            if pr: oy=goy; last_drop=0
-            prev_up=up; prev_lt=lt; prev_rt=rt; last_inp=t0
-
-        if t0-last_drop>=drop_iv:
-            if _t_valid(board,piece,ox,oy+1):
-                oy+=1
-            else:
-                for x,y in piece:
-                    if y+oy>=0: board[y+oy][x+ox]=col
-                new_b=[r for r in board if any(c is None for c in r)]
-                cleared=_T_ROWS-len(new_b)
-                if cleared:
-                    lines_total+=cleared
-                    score+=[0,100,300,500,800][min(cleared,4)]*level
-                    level=lines_total//10+1
-                    board=[[None]*_T_COLS for _ in range(cleared)]+new_b
-                piece,col=_new(); ox=_T_COLS//2-2; oy=-2
-                if not _t_valid(board,piece,ox,oy): break
-            last_drop=t0
-
-        _show(_draw(piece,col,ox,oy,goy))
-        time.sleep(max(0,FRAME-(time.time()-t0)))
-
-    if score>state.high_scores["TETRIS"]:
-        state.high_scores["TETRIS"]=score; settings_mgr.save()
-    _game_over("TETRIS",score)
-
 # ── breakout ──────────────────────────────────────────────────────────────────
 _BRK_ROWS=5; _BRK_COLS=8; _BRK_W=14; _BRK_H=6; _BRK_PAD_Y=2; _BRK_OFF_Y=16
 _BRK_COLS_C=[(220,50,50),(220,150,30),(200,200,0),(50,200,80),(50,150,220)]
@@ -393,7 +267,7 @@ def _game_breakout():
     _game_over("BREAKOUT",score)
 
 # ── launcher ──────────────────────────────────────────────────────────────────
-_GAME_FNS = [_game_snake, _game_pong, _game_flappy, _game_tetris, _game_breakout]
+_GAME_FNS = [_game_snake, _game_pong, _game_flappy, _game_breakout]
 
 def launch(idx):
     state.game_active = True

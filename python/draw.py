@@ -234,7 +234,7 @@ def draw_pihole():
     return img
 
 # ── games hub ─────────────────────────────────────────────────────────────────
-_GAME_HS_KEYS = ["SNAKE", "PONG", "FLAPPY", "TETRIS", "BREAKOUT"]
+_GAME_HS_KEYS = ["SNAKE", "PONG", "FLAPPY", "BREAKOUT"]
 
 def draw_games():
     img = Image.new("RGB", (W, H), BG)
@@ -248,13 +248,13 @@ def draw_games():
     n       = len(GAME_LIST)
     visible = 4
     offset  = max(0, state.game_sel - (visible - 1))
+    row_h   = 26
 
     y = 18
     for i in range(offset, min(offset + visible, n)):
         name = GAME_LIST[i]
         sel  = (state.game_sel == i)
         hi   = state.high_scores.get(_GAME_HS_KEYS[i], 0)
-        row_h = 26
         if sel:
             d.rectangle([0, y, W - 1, y + row_h - 2], fill=(40, 35, 0))
             d.rectangle([0, y, 3,     y + row_h - 2], fill=ACC_GAME)
@@ -264,12 +264,11 @@ def draw_games():
                hs_s, font=F_FOOT, fill=(180, 150, 0) if sel else T_DIM)
         y += row_h
 
-    # scroll dots
-    if n > visible:
-        dot_h = (visible * 26) // n
-        dot_y = 18 + offset * (visible * 26) // n
-        d.rectangle([W - 3, 18, W - 1, 18 + visible * 26 - 1], fill=T_DIM)
-        d.rectangle([W - 3, dot_y, W - 1, dot_y + dot_h - 1], fill=ACC_GAME)
+    # show ▼ arrow only when more items exist below visible window
+    if offset + visible < n:
+        arrow = "▼ more"
+        d.text(((W - _tw(d, arrow, F_FOOT)) // 2, H - 10),
+               arrow, font=F_FOOT, fill=T_DIM)
 
     return img
 
