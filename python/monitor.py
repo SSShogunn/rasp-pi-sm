@@ -57,7 +57,7 @@ try:
     while state.running:
         now        = time.time()
         sleep_secs = SLEEP_PRESETS[state.sleep_idx]
-        if not state.sleeping and sleep_secs > 0 and (now - state.last_activity) >= sleep_secs:
+        if not state.sleeping and not state.game_active and sleep_secs > 0 and (now - state.last_activity) >= sleep_secs:
             state.sleeping = True
             with state._lock:
                 state.lcd.bl_DutyCycle(0)

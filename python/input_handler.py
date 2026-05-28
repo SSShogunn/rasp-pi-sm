@@ -41,7 +41,7 @@ def _down():
     elif state.page == PAGE_HOME:
         state.hints_open = True; draw.render()
     elif state.page == PAGE_GAMES:
-        state.game_sel = (state.game_sel + 1) % 3; draw.render()
+        state.game_sel = (state.game_sel + 1) % len(GAME_LIST); draw.render()
     elif state.page == PAGE_SET and state.set_app is None:
         state.set_sel = (state.set_sel + 1) % len(SET_APPS); draw.render()
 
@@ -62,7 +62,7 @@ def _left():
             settings_mgr.save()
         draw.render(); return
     state.page = (state.page - 1) % PAGES
-    draw.render()
+    draw.slide_render(-1)
 
 def _right():
     if _wake_if_sleeping(): return
@@ -81,7 +81,7 @@ def _right():
             settings_mgr.save()
         draw.render(); return
     state.page = (state.page + 1) % PAGES
-    draw.render()
+    draw.slide_render(1)
 
 def _home():
     if _wake_if_sleeping(): return

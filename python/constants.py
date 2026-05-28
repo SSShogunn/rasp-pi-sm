@@ -26,7 +26,7 @@ SLEEP_LABELS  = ["10s", "20s", "30s", "1m", "2m", "5m", "Off"]
 SERVICES      = [("pihole-FTL", "pihole-FTL"),
                  ("Tailscale",  "tailscaled"),
                  ("SSH",        "ssh")]
-GAME_LIST     = ["SNAKE", "PONG", "FLAPPY BIRD"]
+GAME_LIST     = ["SNAKE", "PONG", "FLAPPY", "TETRIS", "BREAKOUT"]
 SET_APPS      = ["Brightness", "Sleep", "WiFi", "Bluetooth", "Hotspot"]
 W = H         = 128
 

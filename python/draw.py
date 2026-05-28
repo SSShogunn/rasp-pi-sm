@@ -3,6 +3,8 @@ from PIL import Image, ImageDraw
 import state
 from constants import *
 
+_last_img = None  # cached last rendered frame for slide transitions
+
 # ── primitives ────────────────────────────────────────────────────────────────
 def _tw(d, text, font):
     try:
@@ -232,6 +234,8 @@ def draw_pihole():
     return img
 
 # ── games hub ─────────────────────────────────────────────────────────────────
+_GAME_HS_KEYS = ["SNAKE", "PONG", "FLAPPY", "TETRIS", "BREAKOUT"]
+
 def draw_games():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
@@ -241,14 +245,31 @@ def draw_games():
     pg = f"{state.page + 1}/{PAGES}"
     d.text((W - _tw(d, pg, F_FOOT) - 4, 4), pg, font=F_FOOT, fill=T_DIM)
 
-    y = 24
-    for i, name in enumerate(GAME_LIST):
-        sel = (state.game_sel == i)
+    n       = len(GAME_LIST)
+    visible = 4
+    offset  = max(0, state.game_sel - (visible - 1))
+
+    y = 18
+    for i in range(offset, min(offset + visible, n)):
+        name = GAME_LIST[i]
+        sel  = (state.game_sel == i)
+        hi   = state.high_scores.get(_GAME_HS_KEYS[i], 0)
+        row_h = 26
         if sel:
-            d.rectangle([0, y - 3, W - 1, y + 17], fill=(40, 35, 0))
-            d.rectangle([0, y - 3, 3,     y + 17], fill=ACC_GAME)
-        d.text((10, y + 3), name, font=F_VAL, fill=ACC_GAME if sel else T_DIM)
-        y += 26
+            d.rectangle([0, y, W - 1, y + row_h - 2], fill=(40, 35, 0))
+            d.rectangle([0, y, 3,     y + row_h - 2], fill=ACC_GAME)
+        d.text((8, y + 5), name, font=F_VAL, fill=ACC_GAME if sel else T_DIM)
+        hs_s = f"HI:{hi}"
+        d.text((W - _tw(d, hs_s, F_FOOT) - 6, y + 7),
+               hs_s, font=F_FOOT, fill=(180, 150, 0) if sel else T_DIM)
+        y += row_h
+
+    # scroll dots
+    if n > visible:
+        dot_h = (visible * 26) // n
+        dot_y = 18 + offset * (visible * 26) // n
+        d.rectangle([W - 3, 18, W - 1, 18 + visible * 26 - 1], fill=T_DIM)
+        d.rectangle([W - 3, dot_y, W - 1, dot_y + dot_h - 1], fill=ACC_GAME)
 
     return img
 
@@ -435,16 +456,46 @@ def draw_hints():
     return img
 
 # ── render dispatcher ─────────────────────────────────────────────────────────
+def _build():
+    if   state.power_open:           return draw_power()
+    elif state.hints_open:           return draw_hints()
+    elif state.page == PAGE_HOME:    return draw_home()
+    elif state.page == PAGE_SYS:     return draw_system()
+    elif state.page == PAGE_NET:     return draw_network()
+    elif state.page == PAGE_SVC:     return draw_services()
+    elif state.page == PAGE_PHO:     return draw_pihole()
+    elif state.page == PAGE_GAMES:   return draw_games()
+    elif state.page == PAGE_SET:     return draw_settings_page()
+    else:                            return draw_system()
+
 def render():
-    if   state.power_open:           img = draw_power()
-    elif state.hints_open:           img = draw_hints()
-    elif state.page == PAGE_HOME:    img = draw_home()
-    elif state.page == PAGE_SYS:     img = draw_system()
-    elif state.page == PAGE_NET:     img = draw_network()
-    elif state.page == PAGE_SVC:     img = draw_services()
-    elif state.page == PAGE_PHO:     img = draw_pihole()
-    elif state.page == PAGE_GAMES:   img = draw_games()
-    elif state.page == PAGE_SET:     img = draw_settings_page()
-    else:                            img = draw_system()
+    global _last_img
+    img = _build()
+    _last_img = img
     with state._lock:
         state.lcd.LCD_ShowImage(img)
+
+def slide_render(direction):
+    """Slide to the current page from left (direction=-1) or right (direction=1)."""
+    global _last_img
+    from_img = _last_img
+    to_img   = _build()
+    _last_img = to_img
+    if from_img is None:
+        with state._lock:
+            state.lcd.LCD_ShowImage(to_img)
+        return
+    steps = 4
+    wide  = Image.new("RGB", (W * 2, H))
+    if direction > 0:   # new page slides in from right
+        wide.paste(from_img, (0, 0))
+        wide.paste(to_img,   (W, 0))
+        xs = [W * i // steps for i in range(1, steps + 1)]
+    else:               # new page slides in from left
+        wide.paste(to_img,   (0, 0))
+        wide.paste(from_img, (W, 0))
+        xs = [W - W * i // steps for i in range(1, steps + 1)]
+    for x in xs:
+        frame = wide.crop((x, 0, x + W, H))
+        with state._lock:
+            state.lcd.LCD_ShowImage(frame)
