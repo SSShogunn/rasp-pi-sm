@@ -38,6 +38,8 @@ KEY2                   →  Home (return to home page from anywhere)
 KEY3                   →  Back (dismiss menus / return to previous level)
 ```
 
+**In games:** KEY2 = action (shoot / flap) · KEY3 = pause menu (resume / exit). The joystick centre press also works as the action button.
+
 Press **Down on the Home page** to open the Controls overlay with the full key reference.
 
 ---

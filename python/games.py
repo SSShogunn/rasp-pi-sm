@@ -20,6 +20,69 @@ def _show(img):
     with _lock_ref:
         _lcd_ref.LCD_ShowImage(img)
 
+# ── controls ──────────────────────────────────────────────────────────────────
+#   KEY2 (middle right) = action (shoot / flap), also joystick centre press
+#   KEY3 (bottom right) = pause menu (resume / exit)
+def _action(lcd):
+    return lcd.GPIO_KEY2_PIN.value or lcd.GPIO_KEY_PRESS_PIN.value
+
+def _pause_menu(lcd):
+    """Blocking pause overlay. Call when KEY3 is pressed.
+    Returns 'resume' or 'exit'."""
+    # consume the KEY3 press that opened the menu
+    while lcd.GPIO_KEY3_PIN.value and state.running:
+        time.sleep(0.02)
+
+    sel = 0   # 0 = resume, 1 = exit
+    prev_up = prev_dn = prev_act = prev_k3 = True   # ignore anything held on entry
+    while state.running:
+        img = Image.new("RGB", (W, H), (0, 0, 0))
+        d   = ImageDraw.Draw(img)
+        tw  = lambda t, f: int(d.textlength(t, font=f))
+        d.rectangle([8, 22, W - 9, H - 22], fill=(14, 14, 26), outline=(80, 80, 120))
+        d.text(((W - tw("PAUSED", F_VAL)) // 2, 30), "PAUSED", font=F_VAL, fill=T_PRI)
+        for i, label in enumerate(("RESUME", "EXIT")):
+            yy  = 54 + i * 22
+            on  = (sel == i)
+            col = ((0, 220, 120) if i == 0 else (255, 80, 80)) if on else T_DIM
+            if on:
+                d.rectangle([16, yy - 3, W - 17, yy + 13], outline=col)
+            d.text(((W - tw(label, F_VAL)) // 2, yy), label, font=F_VAL, fill=col)
+        d.text(((W - tw("KEY2 select", F_FOOT)) // 2, H - 18),
+               "KEY2 select", font=F_FOOT, fill=T_DIM)
+        _show(img)
+
+        up  = lcd.GPIO_KEY_UP_PIN.value
+        dn  = lcd.GPIO_KEY_DOWN_PIN.value
+        act = _action(lcd)
+        k3  = lcd.GPIO_KEY3_PIN.value
+        if up and not prev_up: sel = (sel - 1) % 2
+        if dn and not prev_dn: sel = (sel + 1) % 2
+        if act and not prev_act:
+            res = "exit" if sel == 1 else "resume"
+            while _action(lcd) and state.running:      # wait for release
+                time.sleep(0.02)
+            return res
+        if k3 and not prev_k3:
+            while lcd.GPIO_KEY3_PIN.value and state.running:
+                time.sleep(0.02)
+            return "resume"
+        prev_up, prev_dn, prev_act, prev_k3 = up, dn, act, k3
+        time.sleep(0.03)
+    return "exit"
+
+def _finish(key, score, quit_early=False):
+    """Save high score, then either show GAME OVER (natural death) or return
+    straight to the menu (user chose Exit from the pause menu)."""
+    if score > state.high_scores.get(key, 0):
+        state.high_scores[key] = score
+        settings_mgr.save()
+    if quit_early:
+        state.game_active = False
+        if _render_fn: _render_fn()
+    else:
+        _game_over(key, score)
+
 def _game_over(key, score):
     hi = state.high_scores.get(key, 0)
     img = Image.new("RGB", (W, H), (15, 0, 0))
@@ -57,6 +120,7 @@ def _game_snake():
     food   = _sn_food(snake)
     score  = 0; step = 0.18
     last_step = last_inp = time.time()
+    quit_early = False
     lcd = _lcd_ref
 
     while state.running:
@@ -66,7 +130,9 @@ def _game_snake():
             elif lcd.GPIO_KEY_DOWN_PIN.value  and direc != (0, -1): pend = (0,  1); last_inp = now
             elif lcd.GPIO_KEY_LEFT_PIN.value  and direc != (1,  0): pend = (-1, 0); last_inp = now
             elif lcd.GPIO_KEY_RIGHT_PIN.value and direc != (-1, 0): pend = (1,  0); last_inp = now
-        if lcd.GPIO_KEY3_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value:
+            if _pause_menu(lcd) == "exit": quit_early = True; break
+            last_step = last_inp = time.time(); continue
 
         if now - last_step >= step:
             direc = pend
@@ -93,10 +159,7 @@ def _game_snake():
             _show(img)
         time.sleep(0.02)
 
-    if score > state.high_scores["SNAKE"]:
-        state.high_scores["SNAKE"] = score
-        settings_mgr.save()
-    _game_over("SNAKE", score)
+    _finish("SNAKE", score, quit_early)
 
 # ── pong ──────────────────────────────────────────────────────────────────────
 def _game_pong():
@@ -107,13 +170,16 @@ def _game_pong():
     p_sc=0; a_sc=0
     BG_P=(5,5,20); PLCOL=(0,200,255); AICOL=(255,80,50); BCOL=(255,220,0)
     FRAME=1.0/30
+    quit_early = False
     lcd = _lcd_ref
 
     while state.running:
         t0 = time.time()
         if lcd.GPIO_KEY_UP_PIN.value:   pl_y = max(0, pl_y - PL_SPD)
         if lcd.GPIO_KEY_DOWN_PIN.value: pl_y = min(H - PAD_H, pl_y + PL_SPD)
-        if lcd.GPIO_KEY3_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value:
+            if _pause_menu(lcd) == "exit": quit_early = True; break
+            continue
 
         ball[0] += bvx; ball[1] += bvy
         if ball[1] <= 0:       ball[1] = 0;      bvy = abs(bvy)
@@ -143,16 +209,13 @@ def _game_pong():
         _show(img)
         time.sleep(max(0, FRAME - (time.time() - t0)))
 
-    if p_sc > state.high_scores["PONG"]:
-        state.high_scores["PONG"] = p_sc
-        settings_mgr.save()
-    _game_over("PONG", p_sc)
+    _finish("PONG", p_sc, quit_early)
 
 # ── flappy ────────────────────────────────────────────────────────────────────
 def _game_flappy():
     GRAVITY=0.35; FLAP=-3.5; PIPE_W=14; GAP=40; SCROLL=2; BIRD_X=28; BIRD_S=6
     bird_y=float(H//2); bird_v=0.0; pipes=[]; score=0; ticks=0
-    prev_up=prev_pr=prev_k3=False
+    prev_up=prev_pr=prev_a=False; quit_early=False
     BG_F=(5,8,28); PCOL=(30,160,50); BCOL=(255,220,0); GCOL=(30,20,8)
     FRAME=1.0/30
     lcd = _lcd_ref
@@ -164,10 +227,12 @@ def _game_flappy():
 
         up_now = lcd.GPIO_KEY_UP_PIN.value
         pr_now = lcd.GPIO_KEY_PRESS_PIN.value
-        k3_now = lcd.GPIO_KEY3_PIN.value
-        flap   = (up_now and not prev_up) or (pr_now and not prev_pr) or (k3_now and not prev_k3)
-        prev_up = up_now; prev_pr = pr_now; prev_k3 = k3_now
-        if lcd.GPIO_KEY3_PIN.value: break
+        a_now  = lcd.GPIO_KEY2_PIN.value
+        flap   = (up_now and not prev_up) or (pr_now and not prev_pr) or (a_now and not prev_a)
+        prev_up = up_now; prev_pr = pr_now; prev_a = a_now
+        if lcd.GPIO_KEY3_PIN.value:
+            if _pause_menu(lcd) == "exit": quit_early = True; break
+            prev_up = prev_pr = prev_a = True; continue
 
         if flap: bird_v = FLAP
         bird_v += GRAVITY; bird_y += bird_v
@@ -198,10 +263,7 @@ def _game_flappy():
         _show(img)
         time.sleep(max(0, FRAME - (time.time() - t0)))
 
-    if score > state.high_scores["FLAPPY"]:
-        state.high_scores["FLAPPY"] = score
-        settings_mgr.save()
-    _game_over("FLAPPY", score)
+    _finish("FLAPPY", score, quit_early)
 
 # ── breakout ──────────────────────────────────────────────────────────────────
 _BRK_ROWS=5; _BRK_COLS=8; _BRK_W=14; _BRK_H=6; _BRK_PAD_Y=2; _BRK_OFF_Y=16
@@ -216,11 +278,13 @@ def _game_breakout():
     bx=float(W//2); by=float(PAD_Y-BALL-2)
     speed=2.2
     bvx=speed*(1 if random.random()>0.5 else -1); bvy=-speed
-    score=0; lives=3; FRAME=1.0/40
+    score=0; lives=3; FRAME=1.0/40; quit_early=False
 
     while state.running:
         t0=time.time()
-        if lcd.GPIO_KEY3_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value:
+            if _pause_menu(lcd) == "exit": quit_early = True; break
+            continue
         if lcd.GPIO_KEY_LEFT_PIN.value:  px=max(0,px-4)
         if lcd.GPIO_KEY_RIGHT_PIN.value: px=min(W-PAD_W,px+4)
         bx+=bvx; by+=bvy
@@ -264,9 +328,7 @@ def _game_breakout():
         _show(img)
         time.sleep(max(0,FRAME-(time.time()-t0)))
 
-    if score>state.high_scores["BREAKOUT"]:
-        state.high_scores["BREAKOUT"]=score; settings_mgr.save()
-    _game_over("BREAKOUT",score)
+    _finish("BREAKOUT", score, quit_early)
 
 # ── space invaders ────────────────────────────────────────────────────────────
 _INV_ECOLS = 6; _INV_EROWS = 3
@@ -288,7 +350,7 @@ def _game_invaders():
     SHW = 18; SHH = 5
     score  = 0; lives = 3; level = 1
     FRAME  = 1.0 / 30
-    prev_up = prev_pr = False
+    prev_up = prev_pr = prev_a = False; quit_early = False
     last_eshot = time.time()
 
     def _al():
@@ -310,15 +372,18 @@ def _game_invaders():
 
     while state.running:
         t0 = time.time()
-        if lcd.GPIO_KEY3_PIN.value: break
+        if lcd.GPIO_KEY3_PIN.value:
+            if _pause_menu(lcd) == "exit": quit_early = True; break
+            last_move = last_eshot = time.time()
+            prev_up = prev_pr = prev_a = True; continue
 
         if lcd.GPIO_KEY_LEFT_PIN.value:  px = max(0, px - 3)
         if lcd.GPIO_KEY_RIGHT_PIN.value: px = min(W - PW, px + 3)
 
-        up = lcd.GPIO_KEY_UP_PIN.value; pr = lcd.GPIO_KEY_PRESS_PIN.value
-        if (up and not prev_up) or (pr and not prev_pr):
+        up = lcd.GPIO_KEY_UP_PIN.value; pr = lcd.GPIO_KEY_PRESS_PIN.value; a = lcd.GPIO_KEY2_PIN.value
+        if (up and not prev_up) or (pr and not prev_pr) or (a and not prev_a):
             if pbul is None: pbul = [px + PW // 2, py - 1]
-        prev_up = up; prev_pr = pr
+        prev_up = up; prev_pr = pr; prev_a = a
 
         if pbul:
             pbul[1] -= 5
@@ -431,9 +496,7 @@ def _game_invaders():
         _show(img)
         time.sleep(max(0, FRAME - (time.time() - t0)))
 
-    if score > state.high_scores.get("INVADERS", 0):
-        state.high_scores["INVADERS"] = score; settings_mgr.save()
-    _game_over("INVADERS", score)
+    _finish("INVADERS", score, quit_early)
 
 # ── launcher ──────────────────────────────────────────────────────────────────
 _GAME_FNS = [_game_snake, _game_pong, _game_flappy, _game_breakout, _game_invaders]
