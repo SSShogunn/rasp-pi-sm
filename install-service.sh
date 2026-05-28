@@ -32,6 +32,15 @@ After=dev-spidev0.0.device
 
 [Service]
 Type=simple
+# ── memory tuning ────────────────────────────────────────────────────────────
+# glibc spawns up to 8 malloc arenas per core for threaded apps (the cause of
+# the huge VSZ + fragmented RSS). Cap arenas and trim aggressively. Pin the
+# numpy/OpenBLAS threadpools to 1 so importing numpy doesn't fan out threads.
+Environment=MALLOC_ARENA_MAX=2
+Environment=MALLOC_TRIM_THRESHOLD_=131072
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+Environment=PYTHONUNBUFFERED=1
 ExecStartPre=/bin/sleep 3
 ExecStartPre=${PYTHON} ${PYTHON_DIR}/lcd_off.py
 ExecStart=${PYTHON} ${PYTHON_DIR}/monitor.py

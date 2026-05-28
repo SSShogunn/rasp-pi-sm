@@ -6,12 +6,16 @@ from constants import (REFRESH, REFRESH_WTH, REFRESH_PHO,
 
 log = logging.getLogger(__name__)
 
-try:
-    import psutil
-    _PSUTIL = True
-except ImportError:
-    _PSUTIL = False
-    log.warning("psutil not installed — using /proc fallback. Run: sudo pip3 install psutil --break-system-packages")
+# psutil is convenient but adds ~6-8 MB resident. The /proc + os fallbacks
+# below cover every metric we need, so default to those. Set DASH_USE_PSUTIL=1
+# to opt back into psutil.
+_PSUTIL = False
+if os.environ.get("DASH_USE_PSUTIL", "0") == "1":
+    try:
+        import psutil
+        _PSUTIL = True
+    except ImportError:
+        log.warning("DASH_USE_PSUTIL=1 but psutil not installed — using /proc fallback")
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _run(cmd):

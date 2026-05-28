@@ -48,6 +48,13 @@ _fetch_thread.start()
 state._fetch_now.set()   # kick off first fetch immediately
 _button_thread.start()
 
+# ── trim memory after startup ─────────────────────────────────────────────────
+# Freeze all objects allocated during import/init so the GC never rescans them,
+# then collect once. Reduces GC overhead and steady-state RSS churn.
+import gc
+gc.collect()
+gc.freeze()
+
 # ── signal handler ────────────────────────────────────────────────────────────
 def _sig(s, f):
     state.running = False
