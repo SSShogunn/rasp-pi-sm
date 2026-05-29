@@ -8,7 +8,7 @@ A sleek, dark-themed system dashboard for the **Raspberry Pi Zero 2W** with the 
 
 | Page | What it shows |
 |---|---|
-| **Home** | Live clock, date, weather + condition icon (OpenWeatherMap), uptime, load avg |
+| **Home** | Live clock, date, hostname, CPU/RAM bars, temp, disk, IP/SSID, uptime, load avg |
 | **System** | CPU % + history graph, RAM % + history graph, Disk %, Temperature, CPU freq |
 | **Network** | SSID, signal bars, WiFi/USB/Tailscale IPs, live RX/TX speed graphs |
 | **Pi-hole** | Blocked queries, % blocked, gravity list size, last blocked domain |
@@ -80,9 +80,7 @@ Create `python/settings.json` (gitignored):
 {
   "bl_pct": 60,
   "sleep_idx": 2,
-  "pho_password": "your-pihole-app-password",
-  "weather_api_key": "your-openweathermap-key",
-  "weather_city": "Pune, IN"
+  "pho_password": "your-pihole-app-password"
 }
 ```
 
@@ -123,7 +121,7 @@ rasp-pi-sm/
     constants.py        <- page IDs, colors, fonts, config
     state.py            <- shared mutable state + LCD init
     settings_mgr.py     <- load / save settings.json
-    fetch.py            <- system / network / weather / Pi-hole fetchers + bg thread
+    fetch.py            <- system / network / Pi-hole fetchers + bg thread
     pihole_api.py       <- Pi-hole v6 REST API (session auth)
     draw.py             <- all page draw functions + render()
     games.py            <- Snake, Pong, Flappy, Breakout, Space Invaders
@@ -142,7 +140,6 @@ Requires **Pi-hole v6** with the REST API enabled. Uses **app password authentic
 
 - Live query stats (total, blocked, cached, clients, gravity size)
 - Last blocked domain
-- Enable / disable blocking toggle (joystick press on the Pi-hole page)
 
 ---
 
@@ -150,10 +147,9 @@ Requires **Pi-hole v6** with the REST API enabled. Uses **app password authentic
 
 | Service | Where to get it |
 |---|---|
-| Weather | [openweathermap.org](https://openweathermap.org/api) — free tier |
 | Pi-hole | Admin panel -> Settings -> API -> App Password |
 
-Store both in `python/settings.json` (never committed — in `.gitignore`).
+Store it in `python/settings.json` (never committed — in `.gitignore`).
 
 ---
 

@@ -1,8 +1,7 @@
-import time, subprocess, os, json, io, socket, urllib.request, urllib.parse, logging
-from PIL import Image as _PILImage
+import time, subprocess, os, socket, logging
 import state, pihole_api
-from constants import (REFRESH, REFRESH_WTH, REFRESH_PHO,
-                       WTH_URL, PAGE_HOME, PAGE_SYS, PAGE_NET, PAGE_PHO)
+from constants import (REFRESH, REFRESH_PHO,
+                       PAGE_HOME, PAGE_SYS, PAGE_NET, PAGE_PHO)
 
 log = logging.getLogger(__name__)
 
@@ -239,50 +238,6 @@ def fetch_network():
     state.data["tx_total"] = _fmt_bytes(tx)
     state._prev_net.update({"rx": rx, "tx": tx, "t": now})
 
-# ── weather ───────────────────────────────────────────────────────────────────
-_icon_cache: str | None = None   # last downloaded icon code
-
-def fetch_weather():
-    if not state.weather_api_key or not state.weather_city:
-        return
-    try:
-        city_enc = urllib.parse.quote(state.weather_city)
-        url = f"{WTH_URL}?q={city_enc}&appid={state.weather_api_key}&units=metric"
-        with urllib.request.urlopen(url, timeout=10) as r:
-            j = json.loads(r.read())
-        m = j["main"]
-        state.data["wth_temp"]     = f"{m['temp']:.1f}"
-        state.data["wth_feels"]    = f"{m['feels_like']:.1f}"
-        state.data["wth_humidity"] = str(m["humidity"])
-        state.data["wth_wind"]     = f"{j['wind']['speed']:.1f}"
-        state.data["wth_desc"]     = j["weather"][0]["description"].title()
-        state.data["wth_city"]     = j["name"]
-        state.data["wth_icon"]     = j["weather"][0]["icon"]
-    except Exception as e:
-        log.warning("Weather fetch failed: %s", e)
-        return
-
-    _fetch_weather_icon(state.data["wth_icon"])
-
-def _fetch_weather_icon(icon_code: str):
-    global _icon_cache
-    if icon_code == _icon_cache:
-        return
-    try:
-        url = f"https://openweathermap.org/img/wn/{icon_code}@2x.png"
-        with urllib.request.urlopen(url, timeout=8) as r:
-            raw = r.read()
-        img = _PILImage.open(io.BytesIO(raw)).convert("RGBA")
-        try:
-            resample = _PILImage.Resampling.LANCZOS
-        except AttributeError:
-            resample = _PILImage.LANCZOS
-        state.wth_icon_img = img.resize((26, 26), resample)
-        _icon_cache = icon_code
-        log.info("Weather icon %s fetched", icon_code)
-    except Exception as e:
-        log.warning("Weather icon fetch failed: %s", e)
-
 # ── pi-hole ───────────────────────────────────────────────────────────────────
 def fetch_pihole():
     if not pihole_api.ensure_auth():
@@ -314,14 +269,14 @@ def fetch_pihole():
         state.data["pho_last"] = "--"
 
 # ── background fetch thread ───────────────────────────────────────────────────
-#   index:        0              1            2             3
-_FNS = [fetch_weather, fetch_system, fetch_network, fetch_pihole]
-_IVS = [REFRESH_WTH,   REFRESH,      REFRESH,       REFRESH_PHO]
+#   index:        0            1             2
+_FNS = [fetch_system, fetch_network, fetch_pihole]
+_IVS = [REFRESH,      REFRESH,       REFRESH_PHO]
 _PAGE_FETCH_MAP = {
-    PAGE_HOME: 0,   # fetch_weather
-    PAGE_SYS:  1,   # fetch_system
-    PAGE_NET:  2,   # fetch_network
-    PAGE_PHO:  3,   # fetch_pihole
+    PAGE_HOME: 0,   # fetch_system (Home is a system overview)
+    PAGE_SYS:  0,   # fetch_system
+    PAGE_NET:  1,   # fetch_network
+    PAGE_PHO:  2,   # fetch_pihole
 }
 
 def run_bg(render_fn):

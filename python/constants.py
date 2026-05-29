@@ -11,11 +11,9 @@ PAGE_SET  = 5
 
 # ── hardware / API ────────────────────────────────────────────────────────────
 PHO_HOST      = "http://localhost"
-WTH_URL       = "https://api.openweathermap.org/data/2.5/weather"
 
 # ── refresh intervals (seconds) ───────────────────────────────────────────────
 REFRESH       = 5
-REFRESH_WTH   = 900
 REFRESH_PHO   = 10
 
 # ── auto-dim (night brightness cap) ───────────────────────────────────────────

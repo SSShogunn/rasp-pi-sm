@@ -75,75 +75,61 @@ def _temp_color(t_str, hot=35, warn=28):
     except Exception:
         return T_DIM
 
-# ── home ──────────────────────────────────────────────────────────────────────
+# ── home (system overview) ──────────────────────────────────────────────────
 def draw_home():
     img = Image.new("RGB", (W, H), BG)
     d   = ImageDraw.Draw(img)
 
     now    = time.localtime()
     clk    = time.strftime("%H:%M", now)
-    date_s = time.strftime("%a, %d %b %Y", now)
+    date_s = time.strftime("%a %d %b", now)
 
-    # ── weather icon (top-right, 26×26) ──────────────────────────────────────
-    ICON_SIZE = 26
-    ICON_X    = W - ICON_SIZE - 1
-    if state.wth_icon_img is not None:
-        icon = state.wth_icon_img
-        img.paste(icon, (ICON_X, 1),
-                  mask=icon.getchannel("A") if icon.mode == "RGBA" else None)
-    else:
-        # placeholder circle when icon not yet loaded
-        d.ellipse([ICON_X + 4, 4, ICON_X + ICON_SIZE - 4, ICON_SIZE - 2], outline=T_DIM)
-        d.text((ICON_X + 8, 8), "?", font=F_FOOT, fill=T_DIM)
+    # ── top bar: hostname · page ────────────────────────────────────────────────
+    d.text((4, 2), state.data.get("host", "pi"), font=F_FOOT, fill=ACC_NET)
+    pg = f"{state.page + 1}/{PAGES}"
+    d.text((W - _tw(d, pg, F_FOOT) - 4, 2), pg, font=F_FOOT, fill=T_DIM)
 
-    # ── clock (centered in space left of icon) ────────────────────────────────
-    avail_w = ICON_X - 2
-    d.text(((avail_w - _tw(d, clk, F_BIG)) // 2, 1), clk, font=F_BIG, fill=T_PRI)
+    # ── big clock + date ────────────────────────────────────────────────────────
+    d.text(((W - _tw(d, clk, F_BIG)) // 2, 12), clk, font=F_BIG, fill=T_PRI)
+    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 36), date_s, font=F_LABEL, fill=T_DIM)
+    _sep(d, 50)
 
-    # ── date ──────────────────────────────────────────────────────────────────
-    d.text(((W - _tw(d, date_s, F_LABEL)) // 2, 30), date_s, font=F_LABEL, fill=T_DIM)
-    _sep(d, 43)
+    # ── CPU + RAM bars ──────────────────────────────────────────────────────────
+    def _val_int(key):
+        try:    return int(state.data[key])
+        except (ValueError, TypeError): return 0
 
-    # ── weather details ───────────────────────────────────────────────────────
-    city_s  = state.data["wth_city"] if state.data["wth_city"] != "--" else state.weather_city
-    temp_w  = f"{state.data['wth_temp']}°C"
-    tc      = _temp_color(state.data["wth_temp"], hot=35, warn=28)
-    d.text((4, 47), (city_s[:14] if city_s else "No city"), font=F_LABEL, fill=T_SEC)
-    d.text((W - _tw(d, temp_w, F_VAL) - 4, 47), temp_w, font=F_VAL, fill=tc)
+    d.text((4, 53), "CPU", font=F_FOOT, fill=T_SEC)
+    d.text((W - _tw(d, f"{state.data['cpu']}%", F_FOOT) - 4, 53),
+           f"{state.data['cpu']}%", font=F_FOOT, fill=C_CPU)
+    _bar(d, 4, 62, W - 8, 3, _val_int("cpu"), C_CPU)
 
-    desc_s = state.data["wth_desc"]
-    max_w  = W - 8
-    if _tw(d, desc_s, F_LABEL) > max_w:
-        while desc_s and _tw(d, desc_s + "…", F_LABEL) > max_w:
-            desc_s = desc_s[:-1]
-        desc_s += "…"
-    d.text((4, 59), desc_s, font=F_LABEL, fill=T_DIM)
-    d.text((4, 71),
-           f"FL:{state.data['wth_feels']}°  "
-           f"W:{state.data['wth_wind']}m/s  "
-           f"H:{state.data['wth_humidity']}%",
-           font=F_FOOT, fill=T_DIM)
+    d.text((4, 68), "RAM", font=F_FOOT, fill=T_SEC)
+    d.text((W - _tw(d, f"{state.data['ram_used']}%", F_FOOT) - 4, 68),
+           f"{state.data['ram_used']}%", font=F_FOOT, fill=C_RAM)
+    _bar(d, 4, 77, W - 8, 3, _val_int("ram_used"), C_RAM)
+    _sep(d, 83)
 
-    # ── system glance row ───────────────────────────────────────────────────────
-    _sep(d, 84)
-    cpu_v  = f"{state.data['cpu']}%"
-    tmp_v  = f"{state.data['temp']}°"
-    ram_v  = f"{state.data['ram_used']}%"
-    sysc   = _temp_color(state.data["temp"], hot=70, warn=55)
-    d.text((4, 88),  "CPU", font=F_FOOT, fill=T_DIM)
-    d.text((24, 88), cpu_v, font=F_FOOT, fill=C_CPU)
-    d.text((W // 2 - 6, 88), tmp_v, font=F_FOOT, fill=sysc)
-    d.text((W - _tw(d, "RAM " + ram_v, F_FOOT) - 4, 88), "RAM", font=F_FOOT, fill=T_DIM)
-    d.text((W - _tw(d, ram_v, F_FOOT) - 4, 88), ram_v, font=F_FOOT, fill=C_RAM)
+    # ── temp + disk ─────────────────────────────────────────────────────────────
+    tc = _temp_color(state.data["temp"], hot=70, warn=55)
+    d.text((4, 86), "TEMP", font=F_FOOT, fill=T_DIM)
+    d.text((32, 86), f"{state.data['temp']}°C", font=F_FOOT, fill=tc)
+    disk_s = f"DISK {state.data['disk']}%"
+    d.text((W - _tw(d, disk_s, F_FOOT) - 4, 86), disk_s, font=F_FOOT, fill=C_DISK)
+
+    # ── network: SSID + IP ──────────────────────────────────────────────────────
+    ssid = state.data["ssid"]
+    if not ssid or ssid == "--":
+        ssid = "offline"
+    d.text((4, 98), ssid[:10], font=F_FOOT, fill=C_WIFI)
+    d.text((W - _tw(d, state.data["wip"], F_IP) - 4, 97),
+           state.data["wip"], font=F_IP, fill=C_WIFI)
+    _sep(d, 110)
 
     # ── uptime + load ───────────────────────────────────────────────────────────
-    _sep(d, 100)
-    d.text((4, 103), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
-    d.text((W - _tw(d, state.data["load_avg"], F_FOOT) - 4, 103),
+    d.text((4, 113), f"up {state.data['uptime']}", font=F_FOOT, fill=T_DIM)
+    d.text((W - _tw(d, state.data["load_avg"], F_FOOT) - 4, 113),
            state.data["load_avg"], font=F_FOOT, fill=T_SEC)
-    _sep(d, 115)
-    hint = "▼ controls"
-    d.text(((W - _tw(d, hint, F_FOOT)) // 2, 118), hint, font=F_FOOT, fill=T_DIM)
     return img
 
 # ── system ────────────────────────────────────────────────────────────────────

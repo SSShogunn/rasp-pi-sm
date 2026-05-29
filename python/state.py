@@ -1,4 +1,4 @@
-import threading, time, os, subprocess, collections
+import threading, time, os, socket, subprocess, collections
 import LCD_1in44
 from constants import NIGHT_START, NIGHT_END, NIGHT_CAP
 
@@ -25,11 +25,11 @@ data = dict(
     pho_total="--", pho_blocked="--", pho_pct="--",
     pho_gravity="--", pho_clients="--", pho_cached="--",
     pho_status="?", pho_last="--",
-    wth_temp="--", wth_feels="--", wth_humidity="--",
-    wth_wind="--", wth_desc="--", wth_city="--",
-    wth_icon="--",
 )
-wth_icon_img = None   # PIL RGBA image downloaded from OWM, or None
+try:
+    data["host"] = socket.gethostname()
+except Exception:
+    data["host"] = "pi"
 _prev_net     = {"rx": 0, "tx": 0, "t": 0.0}
 
 # ── rolling history for sparklines ────────────────────────────────────────────
@@ -55,8 +55,6 @@ set_app:        int | None    = None
 wifi_on         = _get_rfkill("wlan")
 bt_on           = _get_rfkill("bluetooth")
 pho_password    = ""
-weather_api_key = ""
-weather_city    = ""
 sleep_idx:      int           = 0
 power_open      = False
 power_sel       = 0
