@@ -12,6 +12,7 @@ dependencies = [
     "numpy",
     "spidev",
     "gpiozero",
+    "lgpio",     # GPIO backend for gpiozero; required for PWM (LCD backlight)
 ]
 
 # psutil is optional — only used when DASH_USE_PSUTIL=1 (otherwise /proc is
