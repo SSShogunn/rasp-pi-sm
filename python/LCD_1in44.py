@@ -77,7 +77,10 @@ class LCD(config.RaspberryPi):
     def LCD_Init(self, Lcd_ScanDir):
         if self.module_init() != 0:
             return -1
-        self.bl_DutyCycle(100)
+        # keep the backlight OFF through init so the white power-on / clear
+        # is never shown; the app raises it (apply_backlight) once the first
+        # frame is drawn.
+        self.bl_DutyCycle(0)
         self.LCD_Reset()
         self.LCD_InitReg()
         self.LCD_SetGramScanWay(Lcd_ScanDir)
@@ -99,7 +102,7 @@ class LCD(config.RaspberryPi):
         self.LCD_WriteReg(0x2C)
 
     def LCD_Clear(self):
-        buf = b'\xff' * (self.width * self.height * 2)
+        buf = b'\x00' * (self.width * self.height * 2)   # black, not white
         self.LCD_SetWindows(0, 0, self.width, self.height)
         self.digital_write(self.GPIO_DC_PIN, True)
         for i in range(0, len(buf), 4096):

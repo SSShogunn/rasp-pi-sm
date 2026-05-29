@@ -41,8 +41,9 @@ Environment=MALLOC_TRIM_THRESHOLD_=131072
 Environment=OPENBLAS_NUM_THREADS=1
 Environment=OMP_NUM_THREADS=1
 Environment=PYTHONUNBUFFERED=1
-ExecStartPre=/bin/sleep 3
+# Blank the panel FIRST (kills the power-on white screen), then settle.
 ExecStartPre=${PYTHON} ${PYTHON_DIR}/lcd_off.py
+ExecStartPre=/bin/sleep 2
 ExecStart=${PYTHON} ${PYTHON_DIR}/monitor.py
 ExecStopPost=${PYTHON} ${PYTHON_DIR}/lcd_off.py
 WorkingDirectory=${PYTHON_DIR}
