@@ -64,9 +64,18 @@ signal.signal(signal.SIGTERM, _sig)
 
 # ── main loop: sleep timeout only ─────────────────────────────────────────────
 try:
+    _was_gaming = False
     while state.running:
         now        = time.time()
         sleep_secs = SLEEP_PRESETS[state.sleep_idx]
+        # A game doesn't touch last_activity, so when one ends the timer would
+        # already be expired and the screen would sleep instantly. Reset it on
+        # the game→dashboard transition.
+        if state.game_active:
+            _was_gaming = True
+        elif _was_gaming:
+            _was_gaming = False
+            state.last_activity = now
         if not state.sleeping and not state.game_active and sleep_secs > 0 and (now - state.last_activity) >= sleep_secs:
             state.sleeping = True
         # one place owns the backlight: handles sleep + night auto-dim
