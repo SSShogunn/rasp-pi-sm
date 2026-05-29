@@ -20,20 +20,26 @@ PYTHON="${VENV_DIR}/bin/python3"
 echo "Setting up virtual environment..."
 python3 -m venv "${VENV_DIR}"
 
-# Dependency install is best-effort: piwheels can be slow/flaky. Don't let a
-# network hiccup abort the whole script (the systemd unit below still needs to
-# be written, and the venv may already have the packages from a prior run).
-PIP_OPTS="--timeout 60 --retries 10"
-set +e
-"${PYTHON}" -m pip install --upgrade pip ${PIP_OPTS} --quiet
-"${PYTHON}" -m pip install ${PIP_OPTS} "${SCRIPT_DIR}" --quiet
-PIP_RC=$?
-set -e
-if [ "${PIP_RC}" -ne 0 ]; then
-    echo "WARNING: dependency install failed (network?). Continuing with whatever"
-    echo "         is already in the venv. Re-run this script when online to retry."
+# Set SKIP_DEPS=1 to skip pip entirely and just (re)write the service unit,
+# e.g. when the network is down but the venv already has the packages:
+#     sudo SKIP_DEPS=1 bash install-service.sh
+if [ "${SKIP_DEPS:-0}" = "1" ]; then
+    echo "SKIP_DEPS=1 — skipping pip, using existing venv packages."
 else
-    echo "Dependencies installed."
+    # Best-effort: piwheels can be slow/flaky. Fail fast and don't abort the
+    # script, so the systemd unit below is still written.
+    PIP_OPTS="--timeout 30 --retries 2"
+    set +e
+    "${PYTHON}" -m pip install --upgrade pip ${PIP_OPTS} --quiet
+    "${PYTHON}" -m pip install ${PIP_OPTS} "${SCRIPT_DIR}" --quiet
+    PIP_RC=$?
+    set -e
+    if [ "${PIP_RC}" -ne 0 ]; then
+        echo "WARNING: dependency install failed (network?). Continuing with the"
+        echo "         existing venv. Re-run when online, or use SKIP_DEPS=1."
+    else
+        echo "Dependencies installed."
+    fi
 fi
 
 cat > "$SERVICE_FILE" << EOF
