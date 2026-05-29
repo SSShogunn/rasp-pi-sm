@@ -19,9 +19,22 @@ PYTHON="${VENV_DIR}/bin/python3"
 
 echo "Setting up virtual environment..."
 python3 -m venv "${VENV_DIR}"
-"${PYTHON}" -m pip install --upgrade pip --quiet
-"${PYTHON}" -m pip install "${SCRIPT_DIR}" --quiet
-echo "Dependencies installed."
+
+# Dependency install is best-effort: piwheels can be slow/flaky. Don't let a
+# network hiccup abort the whole script (the systemd unit below still needs to
+# be written, and the venv may already have the packages from a prior run).
+PIP_OPTS="--timeout 60 --retries 10"
+set +e
+"${PYTHON}" -m pip install --upgrade pip ${PIP_OPTS} --quiet
+"${PYTHON}" -m pip install ${PIP_OPTS} "${SCRIPT_DIR}" --quiet
+PIP_RC=$?
+set -e
+if [ "${PIP_RC}" -ne 0 ]; then
+    echo "WARNING: dependency install failed (network?). Continuing with whatever"
+    echo "         is already in the venv. Re-run this script when online to retry."
+else
+    echo "Dependencies installed."
+fi
 
 cat > "$SERVICE_FILE" << EOF
 [Unit]

@@ -12,8 +12,12 @@ dependencies = [
     "numpy",
     "spidev",
     "gpiozero",
-    "psutil",
 ]
+
+# psutil is optional — only used when DASH_USE_PSUTIL=1 (otherwise /proc is
+# used). Install with: pip install ".[psutil]"
+[project.optional-dependencies]
+psutil = ["psutil"]
 
 [tool.setuptools]
 py-modules = []
