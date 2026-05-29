@@ -266,7 +266,9 @@ def _game_flappy():
     _finish("FLAPPY", score, quit_early)
 
 # ── breakout ──────────────────────────────────────────────────────────────────
-_BRK_ROWS=5; _BRK_COLS=8; _BRK_W=14; _BRK_H=6; _BRK_PAD_Y=2; _BRK_OFF_Y=16
+_BRK_ROWS=5; _BRK_COLS=8
+_BRK_PITCH=W//_BRK_COLS          # 16px → fills the full 128px width
+_BRK_W=_BRK_PITCH-2; _BRK_H=6; _BRK_PAD_Y=2; _BRK_OFF_Y=16
 _BRK_COLS_C=[(220,50,50),(220,150,30),(200,200,0),(50,200,80),(50,150,220)]
 
 def _game_breakout():
@@ -299,7 +301,7 @@ def _game_breakout():
         for r in range(_BRK_ROWS):
             for c in range(_BRK_COLS):
                 if not bricks[r][c]: continue
-                rx1=1+c*(_BRK_W+1); ry1=_BRK_OFF_Y+r*(_BRK_H+_BRK_PAD_Y)
+                rx1=c*_BRK_PITCH+1; ry1=_BRK_OFF_Y+r*(_BRK_H+_BRK_PAD_Y)
                 rx2=rx1+_BRK_W-1;   ry2=ry1+_BRK_H-1
                 if bx2>=rx1 and bx1<=rx2 and by2>=ry1 and by1<=ry2:
                     bricks[r][c]=False; score+=(5-r)*10; total-=1
@@ -318,7 +320,7 @@ def _game_breakout():
         for r in range(_BRK_ROWS):
             for c in range(_BRK_COLS):
                 if bricks[r][c]:
-                    rx=1+c*(_BRK_W+1); ry=_BRK_OFF_Y+r*(_BRK_H+_BRK_PAD_Y)
+                    rx=c*_BRK_PITCH+1; ry=_BRK_OFF_Y+r*(_BRK_H+_BRK_PAD_Y)
                     d.rectangle([rx,ry,rx+_BRK_W-1,ry+_BRK_H-1],fill=_BRK_COLS_C[r])
         d.rectangle([px,PAD_Y,px+PAD_W-1,PAD_Y+PAD_H-1],fill=(0,200,255))
         d.ellipse([int(bx),int(by),int(bx)+BALL-1,int(by)+BALL-1],fill=(255,220,80))
