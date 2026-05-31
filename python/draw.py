@@ -27,7 +27,8 @@ def _bar_row(d, y, label, val_str, pct, bar_color):
     _bar(d, 4, y + 12, W - 8, 4, pct, bar_color)
 
 def _spark(d, x, y, w, h, hist, color, vmax=None):
-    """Draw a filled sparkline of `hist` (iterable of numbers) in a w×h box."""
+    """Draw a filled sparkline of `hist` (iterable of numbers) in a w×h box.
+    Samples are always stretched to fill the full width."""
     d.rectangle([x, y, x + w - 1, y + h - 1], fill=TRACK)
     vals = list(hist)
     if not vals:
@@ -36,13 +37,13 @@ def _spark(d, x, y, w, h, hist, color, vmax=None):
     if top <= 0:
         return
     n = len(vals)
-    # right-align: newest sample at the right edge
     for i, v in enumerate(vals):
         bh = max(0, min(h - 1, int((v / top) * (h - 1))))
-        px = x + w - n + i
-        if px < x:
-            continue
-        d.line([(px, y + h - 1), (px, y + h - 1 - bh)], fill=color)
+        # stretch: sample i occupies a proportional horizontal slice
+        x0 = x + int(i * w / n)
+        x1 = x + int((i + 1) * w / n) - 1
+        if bh > 0:
+            d.rectangle([x0, y + h - 1 - bh, x1, y + h - 1], fill=color)
 
 def _signal_bars(d, x, y, quality):
     """4 ascending bars representing wifi quality 0..100."""
